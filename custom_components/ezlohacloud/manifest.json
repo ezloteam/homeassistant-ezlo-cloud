@@ -1,0 +1,11 @@
+{
+  "domain": "ezlohacloud",
+  "name": "Ezlo HA Cloud",
+  "codeowners": ["@tskezlo"],
+  "config_flow": true,
+  "documentation": "https://www.home-assistant.io/integrations/ezlohacloud",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "quality_scale": "bronze",
+  "requirements": ["tomlkit==0.13.2"]
+}

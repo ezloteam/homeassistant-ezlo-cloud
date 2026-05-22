@@ -1,0 +1,95 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set Up Ezlo HA Cloud",
+        "description": "This integration enables secure remote access to your Home Assistant instance via Ezlo Cloud.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        }
+      },
+      "confirm": {
+        "description": "[%key:common::config_flow::description::confirm_setup%]"
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "[%key:common::config_flow::abort::single_instance_allowed%]",
+      "no_devices_found": "[%key:common::config_flow::abort::no_devices_found%]",
+      "already_configured": "[%key:common::config_flow::abort::already_configured_service%]"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "login": "Login to Ezlo Cloud",
+          "signup": "Create a new account",
+          "cloud_status": "Cloud connection status",
+          "view_status": "Subscription status",
+          "subscribe": "Resubscribe",
+          "logout": "Logout"
+        }
+      },
+      "login": {
+        "title": "Login to Ezlo Cloud",
+        "description": "Enter your Ezlo Cloud credentials to enable remote access.\n\n{error_detail}",
+        "data": {
+          "username": "[%key:common::config_flow::data::username%]",
+          "password": "[%key:common::config_flow::data::password%]"
+        }
+      },
+      "signup": {
+        "title": "Create an Ezlo Cloud Account",
+        "description": "Create a new account to start a **free 30-day trial** of Ezlo Cloud remote access.\n\nYou will need to enter a payment method during checkout. Your card will not be charged until the trial ends — you can cancel anytime.\n\n{error_detail}",
+        "data": {
+          "username": "[%key:common::config_flow::data::username%]",
+          "email": "[%key:common::config_flow::data::email%]",
+          "password": "[%key:common::config_flow::data::password%]"
+        }
+      },
+      "cloud_status": {
+        "title": "Cloud Connection",
+        "description": "**Status:** {connection_status}\n\n**Account:** {username}\n\n**Remote URL:** [{cloud_url}]({cloud_url})\n\n{trial_info}",
+        "menu_options": {
+          "init": "Back"
+        }
+      },
+      "view_status": {
+        "title": "Subscription Status",
+        "description": "**Status:** {status}\n\n{trial_info}",
+        "menu_options": {
+          "subscribe": "Resubscribe",
+          "init": "Back"
+        }
+      },
+      "subscribe": {
+        "title": "Complete Your Subscription",
+        "description": "Click the link below to complete checkout in your browser:\n\n[Proceed to checkout]({url})\n\nYour 30-day free trial begins immediately after checkout. This page will update automatically once Stripe confirms the payment method.\n\nIf this page does not update after a few moments, you can close this dialog and reopen the integration options."
+      },
+      "redirecting": {
+        "title": "Complete Payment",
+        "description": "Click the link below to complete your subscription payment:\n\n[Proceed to payment]({url})\n\nThis page will update automatically once payment is confirmed."
+      }
+    },
+    "abort": {
+      "login_successful": "You are now logged in to Ezlo Cloud. Remote access is being configured.\n\n**Remote URL:** [{cloud_url}]({cloud_url})\n\n{trial_info}",
+      "logged_out": "You have been logged out of Ezlo Cloud. Remote access has been disabled.",
+      "config_saved": "Configuration saved successfully.",
+      "signup_trial_started": "Welcome! Your account has been created and your **30-day free trial** has started. Remote access is being configured.\n\n**Remote URL:** [{cloud_url}]({cloud_url})\n\n{trial_info}\n\nYou can subscribe anytime from the integration options before your trial ends.",
+      "subscription_activated": "Your subscription is now active! Remote access has been configured.\n\n**Remote URL:** [{cloud_url}]({cloud_url})\n\n{trial_info}",
+      "stripe_redirect_finished": "Checkout flow completed. Your subscription status will update shortly.",
+      "stripe_failed": "Could not start the checkout flow. Please try again later.",
+      "config_unavailable": "Could not reach the Ezlo cloud to load checkout configuration. Please try again later.",
+      "partner_trial_expired": "Your partner trial has expired. Please contact your account manager to extend access.",
+      "session_expired": "Your session has expired. Please log in again."
+    },
+    "error": {
+      "invalid_credentials": "Invalid username or password. Please try again.",
+      "signup_failed": "Account creation failed. Please try again.",
+      "stripe_failed": "Could not create payment session. Please try again later.",
+      "network_error": "Unable to reach Ezlo Cloud. Please check your internet connection.",
+      "unknown": "An unexpected error occurred. Please try again."
+    }
+  }
+}
