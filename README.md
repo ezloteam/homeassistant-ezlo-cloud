@@ -3,8 +3,8 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 
 Home Assistant custom integration that connects your Home Assistant instance to
-[Ezlo HA Cloud](https://www.ezlo.com), enabling secure remote access to your
-Home Assistant without exposing it to the public internet or configuring port
+[Ezlo HA Cloud](https://ezlo.com/page/homeassistant), enabling secure remote access to
+your Home Assistant without exposing it to the public internet or configuring port
 forwarding on your router.
 
 The integration installs and manages an [FRP](https://github.com/fatedier/frp)
@@ -24,7 +24,7 @@ Home Assistant from anywhere through the Ezlo HA Cloud service.
 
 - Home Assistant `2024.10.0` or newer
 - An Ezlo HA Cloud account and an active subscription
-  (a trial is available — see [www.ezlo.com](https://www.ezlo.com))
+  (a trial is available — see [www.ezlo.com](https://ezlo.com/page/homeassistant))
 - A Home Assistant installation that can reach the public internet on outbound
   HTTPS
 
@@ -67,7 +67,7 @@ the integration options to renew or contact your account manager.
 
 - Issues and feature requests:
   <https://github.com/ezloteam/home-assistant-ezlo-cloud/issues>
-- Product documentation: <https://www.ezlo.com>
+- Product documentation: <https://ezlo.com/page/homeassistant>
 
 ## License
 

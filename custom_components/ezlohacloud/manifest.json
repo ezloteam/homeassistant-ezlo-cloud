@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "codeowners": ["@ezloteam"],
   "config_flow": true,
-  "documentation": "https://github.com/ezloteam/home-assistant-ezlo-cloud",
+  "documentation": "https://ezlo.com/page/homeassistant",
   "issue_tracker": "https://github.com/ezloteam/home-assistant-ezlo-cloud/issues",
   "integration_type": "service",
   "iot_class": "cloud_polling",
