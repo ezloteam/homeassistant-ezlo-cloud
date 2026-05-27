@@ -1,7 +1,7 @@
 {
   "domain": "ezlohacloud",
   "name": "Ezlo HA Cloud",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "codeowners": ["@ezloteam"],
   "config_flow": true,
   "documentation": "https://ezlo.com/page/homeassistant",
