@@ -1,13 +1,13 @@
 {
   "domain": "ezlohacloud",
   "name": "Ezlo HA Cloud",
-  "version": "1.0.1",
   "codeowners": ["@ezloteam"],
   "config_flow": true,
   "documentation": "https://ezlo.com/page/homeassistant",
-  "issue_tracker": "https://github.com/ezloteam/home-assistant-ezlo-cloud/issues",
   "integration_type": "service",
   "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/ezloteam/home-assistant-ezlo-cloud/issues",
   "quality_scale": "bronze",
-  "requirements": ["tomlkit==0.13.2"]
+  "requirements": ["tomlkit==0.13.2"],
+  "version": "1.0.2"
 }
