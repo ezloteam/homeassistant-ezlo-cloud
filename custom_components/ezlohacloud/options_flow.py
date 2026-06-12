@@ -164,11 +164,12 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                     },
                 )
 
+            # "view_status" (Subscription Status) is hidden while billing is
+            # parked; restore the entry here when Stripe payments return.
             return self.async_show_menu(
                 step_id="init",
                 menu_options={
                     "cloud_status": "Cloud Connection Status",
-                    "view_status": "Subscription Status",
                     "logout": "Logout",
                 },
             )
