@@ -19,6 +19,8 @@ SUBSCRIPTION_INCOMPLETE = "incomplete"
 SUBSCRIPTION_INTERNAL = "internal"
 SUBSCRIPTION_PARTNER_TRIAL = "partner_trial"
 SUBSCRIPTION_PARTNER_TRIAL_EXPIRED = "partner_trial_expired"
+# Non-Stripe trial auto-provisioned while billing is parked (BILLING_MODE=internal_trial)
+SUBSCRIPTION_INTERNAL_TRIAL = "internal_trial"
 
 # States that grant access to the integration
 SUBSCRIPTION_VALID_STATES = (
@@ -26,6 +28,7 @@ SUBSCRIPTION_VALID_STATES = (
     SUBSCRIPTION_ACTIVE,
     SUBSCRIPTION_INTERNAL,
     SUBSCRIPTION_PARTNER_TRIAL,
+    SUBSCRIPTION_INTERNAL_TRIAL,
 )
 # States that require remediation (resubscribe for Stripe users, contact
 # account manager for partners)

@@ -24,6 +24,7 @@ from .const import (
     SUBSCRIPTION_ACTIVE,
     SUBSCRIPTION_CANCELED,
     SUBSCRIPTION_INTERNAL,
+    SUBSCRIPTION_INTERNAL_TRIAL,
     SUBSCRIPTION_INVALID_STATES,
     SUBSCRIPTION_PARTNER_TRIAL,
     SUBSCRIPTION_PARTNER_TRIAL_EXPIRED,
@@ -88,6 +89,8 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                 trial_text = f"You are on a free trial with {days} day{'s' if days != 1 else ''} remaining. Your card has been saved and will be charged when the trial ends."
             else:
                 trial_text = "You are on a free trial. Your card has been saved and will be charged when the trial ends."
+        elif sub_status == SUBSCRIPTION_INTERNAL_TRIAL:
+            trial_text = "You are on a free trial."
         elif sub_status == SUBSCRIPTION_INTERNAL:
             trial_text = "Internal user — unlimited access. No subscription required."
         elif sub_status == SUBSCRIPTION_PARTNER_TRIAL:
@@ -207,6 +210,8 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                 trial_info = f"Free trial: {days} day{'s' if days != 1 else ''} remaining. Your card will be charged automatically when the trial ends."
             else:
                 trial_info = "You are on a free trial. Your card will be charged automatically when the trial ends."
+        elif sub_status == SUBSCRIPTION_INTERNAL_TRIAL:
+            trial_info = "You are on a free trial."
         elif sub_status == SUBSCRIPTION_INTERNAL:
             trial_info = "Internal user — unlimited access. No subscription required."
         elif sub_status == SUBSCRIPTION_PARTNER_TRIAL:
@@ -370,7 +375,7 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
     # ── Signup (trial flow — no Stripe) ──────────────────────────
 
     async def async_step_signup(self, user_input=None):
-        """Handle signup with 30-day free trial."""
+        """Handle signup with free trial."""
         errors = {}
         signup_error_detail = ""
 
@@ -402,17 +407,34 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
 
                     trial_ends_at = resp_data.get("trial_ends_at")
                     sub_status = resp_data.get("subscription_status", "")
-
-                    # Stripe Checkout required — store tokens but don't
-                    # mark logged in until trial starts via webhook
-                    self._pending_token = token
-                    self._pending_tunnel_token = tunnel_token
-                    self._pending_user = {
+                    payment_required = resp_data.get("payment_required", True)
+                    user_info = {
                         "uuid": user_uuid,
                         "username": username,
                         "email": email,
                         "ezlo_id": payload.get("ezlo_user_id", ""),
                     }
+
+                    # Billing parked (internal trial): backend already started a
+                    # non-Stripe trial — complete login right away, no checkout.
+                    if not payment_required:
+                        await self._handle_successful_login(
+                            token,
+                            user_info,
+                            tunnel_token=tunnel_token,
+                            subscription_status=sub_status,
+                            trial_ends_at=trial_ends_at,
+                        )
+                        return self.async_abort(
+                            reason="signup_trial_started",
+                            description_placeholders=self._get_abort_placeholders(),
+                        )
+
+                    # Stripe Checkout required — store tokens but don't
+                    # mark logged in until trial starts via webhook
+                    self._pending_token = token
+                    self._pending_tunnel_token = tunnel_token
+                    self._pending_user = user_info
                     new_data = self._config_entry.data.copy()
                     new_data.update(
                         {
@@ -636,6 +658,8 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                 trial_info = f"You are on a free trial with {days} day{'s' if days != 1 else ''} remaining. Your card was saved during checkout and will be charged when the trial ends."
             else:
                 trial_info = "You are currently on a free trial. Your card will be charged when the trial ends."
+        elif sub_status == SUBSCRIPTION_INTERNAL_TRIAL:
+            trial_info = "You are on a free trial."
         elif sub_status == SUBSCRIPTION_PAST_DUE:
             trial_info = "Your last payment failed. Update your payment method to restore remote access."
         elif sub_status == SUBSCRIPTION_CANCELED:

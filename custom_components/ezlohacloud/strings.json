@@ -41,7 +41,7 @@
       },
       "signup": {
         "title": "Create an Ezlo Cloud Account",
-        "description": "Create a new account to start a **free 30-day trial** of Ezlo Cloud remote access.\n\nYou will need to enter a payment method during checkout. Your card will not be charged until the trial ends — you can cancel anytime.\n\n{error_detail}",
+        "description": "Create a new account to start a **free trial** of Ezlo Cloud remote access.\n\n{error_detail}",
         "data": {
           "username": "[%key:common::config_flow::data::username%]",
           "email": "[%key:common::config_flow::data::email%]",
@@ -65,7 +65,7 @@
       },
       "subscribe": {
         "title": "Complete Your Subscription",
-        "description": "Click the link below to complete checkout in your browser:\n\n[Proceed to checkout]({url})\n\nYour 30-day free trial begins immediately after checkout. This page will update automatically once Stripe confirms the payment method.\n\nIf this page does not update after a few moments, you can close this dialog and reopen the integration options."
+        "description": "Click the link below to complete checkout in your browser:\n\n[Proceed to checkout]({url})\n\nYour free trial begins immediately after checkout. This page will update automatically once Stripe confirms the payment method.\n\nIf this page does not update after a few moments, you can close this dialog and reopen the integration options."
       },
       "redirecting": {
         "title": "Complete Payment",
@@ -76,7 +76,7 @@
       "login_successful": "You are now logged in to Ezlo Cloud. Remote access is being configured.\n\n**Remote URL:** [{cloud_url}]({cloud_url})\n\n{trial_info}",
       "logged_out": "You have been logged out of Ezlo Cloud. Remote access has been disabled.",
       "config_saved": "Configuration saved successfully.",
-      "signup_trial_started": "Welcome! Your account has been created and your **30-day free trial** has started. Remote access is being configured.\n\n**Remote URL:** [{cloud_url}]({cloud_url})\n\n{trial_info}\n\nYou can subscribe anytime from the integration options before your trial ends.",
+      "signup_trial_started": "Welcome! Your account has been created and your **free trial** has started. Remote access is being configured.\n\n**Remote URL:** [{cloud_url}]({cloud_url})\n\n{trial_info}",
       "subscription_activated": "Your subscription is now active! Remote access has been configured.\n\n**Remote URL:** [{cloud_url}]({cloud_url})\n\n{trial_info}",
       "stripe_redirect_finished": "Checkout flow completed. Your subscription status will update shortly.",
       "stripe_failed": "Could not start the checkout flow. Please try again later.",
