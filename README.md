@@ -30,14 +30,15 @@ Home Assistant from anywhere through the Ezlo HA Cloud service.
 
 ## Installation
 
-### Via HACS (recommended)
+This integration is available via [HACS](https://hacs.xyz), the Home Assistant Community Store.
 
-1. Open HACS in Home Assistant.
-2. Go to **Integrations** → menu → **Custom repositories**.
-3. Add `https://github.com/ezloteam/home-assistant-ezlo-cloud` as an
-   **Integration** category repository.
-4. Search for **Ezlo HA Cloud** and install it.
-5. Restart Home Assistant.
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ezloteam&repository=home-assistant-ezlo-cloud&category=integration)
+
+### Steps:
+1. Ensure you have [HACS](https://hacs.xyz) installed and configured in your Home Assistant instance.
+2. Use the button above to navigate directly to the integration in HACS or manually search for `Ezlo HA Cloud`.
+3. Install the integration and restart Home Assistant.
+4. Go to **Settings** > **Devices & Services** > **Integrations**, and add `Ezlo HA Cloud`.
 
 ### Manual
 
