@@ -5,7 +5,7 @@ DOMAIN = "ezlohacloud"
 STORAGE_KEY = "ezlo_user_data"
 STORAGE_VERSION = 1
 
-EZLO_API_URI = "https://haapi-dev.ezlo.com"
+EZLO_API_URI = "https://harc.ezlo.com"
 HOMEASSISTANT_HOST = "homeassistant.local"
 
 # Subscription status values (from Stripe)

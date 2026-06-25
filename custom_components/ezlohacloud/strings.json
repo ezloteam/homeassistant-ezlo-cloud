@@ -86,6 +86,7 @@
     },
     "error": {
       "invalid_credentials": "Invalid username or password. Please try again.",
+      "device_already_bound": "This Home Assistant installation is already linked to a different Ezlo Cloud account. Sign out from the other account, or contact support to release the binding.",
       "signup_failed": "Account creation failed. Please try again.",
       "stripe_failed": "Could not create payment session. Please try again later.",
       "network_error": "Unable to reach Ezlo Cloud. Please check your internet connection.",

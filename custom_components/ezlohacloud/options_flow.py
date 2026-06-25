@@ -42,6 +42,49 @@ def _raise_missing_uuid() -> None:
     raise ValueError("UUID missing in token payload")
 
 
+def _classify_login_error(error: str | None) -> tuple[str, str]:
+    """Map a backend login-failure string to a (translation key, detail) tuple.
+
+    The backend currently overloads `POST /api/auth/login` to also check the
+    user's FRP subdomain binding, so a credential-shaped endpoint can return
+    device-binding errors. Without classification the UI would mislabel every
+    failure as "Invalid username or password".
+
+    Returns the translation key for `errors["base"]` and a sanitised detail
+    message to surface as the `error_detail` placeholder.
+    """
+    if not error:
+        return "unknown", ""
+
+    lower = error.lower()
+
+    # Backend's current "subdomain '<hash>' is already taken" shape, plus the
+    # cleaner future shape once the backend ships a dedicated error code.
+    if "device_already_bound" in lower or (
+        "subdomain" in lower and "already taken" in lower
+    ):
+        return (
+            "device_already_bound",
+            "This Home Assistant installation is already linked to a"
+            " different Ezlo Cloud account.",
+        )
+
+    # Genuine credential failures — surface as invalid_credentials with the
+    # backend's own message in the detail line.
+    credential_markers = (
+        "invalid credentials",
+        "invalid username",
+        "invalid password",
+        "user not found",
+        "unauthorized",
+    )
+    if any(marker in lower for marker in credential_markers):
+        return "invalid_credentials", error
+
+    # Anything else — don't pretend it was a credential problem.
+    return "unknown", error
+
+
 def _compute_trial_days(trial_ends_at: str | None) -> int | None:
     """Compute remaining trial days from an ISO datetime string."""
     if not trial_ends_at:
@@ -336,10 +379,10 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                     reason="login_successful",
                     description_placeholders=self._get_abort_placeholders(),
                 )
-            errors["base"] = "invalid_credentials"
-            login_error_detail = (
-                auth_response.get("error") or "Invalid username or password"
+            error_key, login_error_detail = _classify_login_error(
+                auth_response.get("error")
             )
+            errors["base"] = error_key
 
         return self.async_show_form(
             step_id="login",
