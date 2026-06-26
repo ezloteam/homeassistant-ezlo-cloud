@@ -26,7 +26,7 @@ TUNNEL_TOKEN = "tunnel-token-12345"
 
 SERVER_CONFIG_RESPONSE = {
     "serverConfig": {
-        "serverName": "frp-dev.harc.cloud",
+        "serverName": "connect-dev.harc.cloud",
         "serverAddr": "152.42.152.93",
         "serverPort": 7000,
         "auth": {"token": TUNNEL_TOKEN},
@@ -35,7 +35,7 @@ SERVER_CONFIG_RESPONSE = {
                 "name": "proxy-tcp-tunnel-user1",
                 "type": "http",
                 "localPort": 8123,
-                "subdomain": f"abc123:{TUNNEL_TOKEN}.frp-dev.harc.cloud",
+                "subdomain": f"abc123:{TUNNEL_TOKEN}.connect-dev.harc.cloud",
             }
         ],
     }
@@ -104,10 +104,10 @@ async def test_fetch_and_update_frp_config_writes_toml(
     assert '"metadatas.token"' not in contents  # not quoted
     # Subdomain split at colon — only the hash part
     assert 'subdomain = "abc123"' in contents
-    assert f"{TUNNEL_TOKEN}.frp-dev" not in contents
+    assert f"{TUNNEL_TOKEN}.connect-dev" not in contents
 
     # Returned info
-    assert result["server_name"] == "frp-dev.harc.cloud"
+    assert result["server_name"] == "connect-dev.harc.cloud"
     assert result["subdomain"] == "abc123"
 
 
@@ -389,16 +389,24 @@ async def test_async_unload_entry_force_kill_on_timeout(hass: HomeAssistant) -> 
 
 
 def test_no_legacy_frp_endpoints_in_shipped_code() -> None:
-    """Shipped code must not hard-code the retired frp-plugin*.ezlo.com hosts.
+    """Shipped code must not hard-code any retired FRP wildcard host.
 
     All FRP server details (serverAddr, serverPort, serverName, proxy
     subdomains) come from harc-api at runtime via
-    fetch_and_update_frp_config. Any hard-coded reference to the retired
-    frp-plugin.ezlo.com / frp-plugin-dev.ezlo.com hosts is a bug, since
-    harc-api now returns the *.harc.cloud convention.
+    fetch_and_update_frp_config. Any hard-coded reference to a retired
+    host is a bug — harc-api is the single source of truth.
+
+    Currently retired (in chronological order):
+    - frp-plugin(-dev).ezlo.com — pre-HARC FRP namespace.
+    - frp(-dev).harc.cloud — interim wildcard, replaced by connect(-dev).
     """
     pkg_root = Path(__file__).resolve().parent.parent
-    forbidden = ("frp-plugin.ezlo.com", "frp-plugin-dev.ezlo.com")
+    forbidden = (
+        "frp-plugin.ezlo.com",
+        "frp-plugin-dev.ezlo.com",
+        "frp.harc.cloud",
+        "frp-dev.harc.cloud",
+    )
     patterns = ("*.py", "*.json", "*.toml", "*.yaml", "*.yml")
     skip_dirs = {"tests", "config", "bin", "__pycache__"}
 
