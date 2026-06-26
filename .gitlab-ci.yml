@@ -1,0 +1,133 @@
+stages:
+  - sync
+
+variables:
+  GIT_DEPTH: 0  # Full clone to preserve history for squashing
+  GITHUB_REPO: "ezloteam/homeassistant-ezlo-cloud"
+  # Space-separated paths that live ONLY on GitLab and must never be mirrored
+  # to the public GitHub repo (stripped from the squashed commit below).
+  GITHUB_EXCLUDE: "CONTRIBUTING.md"
+
+sync-to-github:
+  stage: sync
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache git curl jq
+  only:
+    - master
+  script:
+    # Configure git
+    - git config --global user.email "ci@ezlo.com"
+    - git config --global user.name "eZLO CI"
+
+    # Add GitHub remote
+    - git remote add github "https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git" || git remote set-url github "https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
+
+    # Fetch GitHub master to compare
+    - git fetch github master || true
+
+    # Determine the commit message from the triggering commit BEFORE moving HEAD.
+    # NOTE: this must happen before any `git reset`, otherwise HEAD points at
+    # github/master (linear history, no merge commits) and detection fails.
+    # The body is read into a file and parsed with pure-shell loops (no
+    # grep|sed|head pipelines) so the job can't die from SIGPIPE/pipefail.
+    - |
+      set +o pipefail 2>/dev/null || true
+      SOURCE_SHA="${CI_COMMIT_SHA}"
+
+      # Is the triggering commit itself a merge commit? (a merge has >=2 parents,
+      # so `<sha> <parent1> <parent2> ...` is >=3 whitespace-separated fields)
+      set -- $(git rev-list --parents -n1 "$SOURCE_SHA")
+      if [ "$#" -ge 3 ]; then
+        MERGE_COMMIT="$SOURCE_SHA"
+      else
+        MERGE_COMMIT=$(git log --merges -1 --format=%H "$SOURCE_SHA" 2>/dev/null || true)
+      fi
+
+      if [ -z "$MERGE_COMMIT" ]; then
+        echo "ERROR: No merge commit found. GitHub sync is only for merge request commits."
+        echo "Direct commits to master will not be synced to GitHub."
+        exit 1
+      fi
+
+      # Read the merge commit body once; parse it without fragile pipelines.
+      git log -1 --format=%B "$MERGE_COMMIT" > /tmp/merge_body.txt
+
+      # Extract the GitLab MR IID from the "See merge request ...!N" trailer.
+      MR_IID=""
+      while IFS= read -r line; do
+        case "$line" in
+          *"See merge request"*!*)
+            iid="${line##*!}"        # text after the last '!'
+            iid="${iid%%[!0-9]*}"    # keep only the leading digits
+            [ -n "$iid" ] && MR_IID="$iid"
+            ;;
+        esac
+      done < /tmp/merge_body.txt
+
+      # Build the commit message from the MR title/description when available.
+      : > /tmp/commit_msg.txt
+      if [ -n "$MR_IID" ] && [ -n "$CI_PROJECT_ID" ]; then
+        MR_DATA=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN:-$CI_JOB_TOKEN}" \
+          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${MR_IID}" || true)
+        MR_TITLE=$(printf '%s' "$MR_DATA" | jq -r '.title // empty' 2>/dev/null || true)
+        MR_DESC=$(printf '%s' "$MR_DATA" | jq -r '.description // empty' 2>/dev/null || true)
+        if [ -n "$MR_TITLE" ]; then
+          printf '%s\n' "$MR_TITLE" > /tmp/commit_msg.txt
+          if [ -n "$MR_DESC" ] && [ "$MR_DESC" != "null" ]; then
+            printf '\n%s\n' "$MR_DESC" >> /tmp/commit_msg.txt
+          fi
+        fi
+      fi
+
+      # Fallback: first meaningful line of the merge commit body.
+      if [ ! -s /tmp/commit_msg.txt ]; then
+        while IFS= read -r line; do
+          case "$line" in
+            "Merge branch"*|"Merge remote-tracking"*|"See merge request"*|"") : ;;
+            *) printf '%s\n' "$line" > /tmp/commit_msg.txt; break ;;
+          esac
+        done < /tmp/merge_body.txt
+      fi
+
+      if [ ! -s /tmp/commit_msg.txt ]; then
+        echo "ERROR: Could not determine a commit message. Skipping GitHub sync."
+        exit 1
+      fi
+
+      echo "Sync commit message:"
+      cat /tmp/commit_msg.txt
+
+    # Check if there are changes to push
+    - |
+      if git diff --quiet "$CI_COMMIT_SHA" github/master 2>/dev/null; then
+        echo "No changes to sync to GitHub"
+        exit 0
+      fi
+
+    # Build a squashed commit on top of GitHub's master
+    - git checkout -b temp-squash-branch "$CI_COMMIT_SHA"
+    - |
+      if git rev-parse --verify github/master >/dev/null 2>&1; then
+        # Preserve GitHub history, add a single squashed commit with this MR's diff
+        git reset --soft github/master
+      else
+        echo "GitHub repository is empty, will push entire history as single commit"
+        git checkout --orphan temp-squash-branch
+        git add -A
+      fi
+
+    - git add -A
+    - |
+      # Strip GitLab-only files so they never reach the public GitHub mirror
+      for path in $GITHUB_EXCLUDE; do
+        git rm -r --cached --ignore-unmatch "$path" >/dev/null 2>&1 || true
+      done
+    - git commit -F /tmp/commit_msg.txt || echo "No changes to commit"
+
+    # Force push to GitHub master (squashed history)
+    - git push github HEAD:master --force
+
+  environment:
+    name: github
+    url: https://github.com/ezloteam/homeassistant-ezlo-cloud
