@@ -8,12 +8,6 @@
           "username": "Username",
           "password": "Password"
         }
-      },
-      "confirm": {
-        "description": "[%key:common::config_flow::description::confirm_setup%]",
-        "data": {
-          "api_uri": "Ezlo Cloud API endpoint (advanced — QA use only)"
-        }
       }
     },
     "abort": {
