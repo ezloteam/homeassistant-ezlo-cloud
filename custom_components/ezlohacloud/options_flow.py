@@ -20,6 +20,8 @@ from .api import (
     signup,
 )
 from .const import (
+    CONF_API_URI,
+    DEFAULT_API_URI,
     DOMAIN,
     SUBSCRIPTION_ACTIVE,
     SUBSCRIPTION_CANCELED,
@@ -171,6 +173,14 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
             return f"https://{subdomain}.{server_name}"
         return ""
 
+    def _get_api_uri(self) -> str:
+        """Return the API URI for the current config entry.
+
+        Falls back to DEFAULT_API_URI when the advanced override is not set,
+        which is the common case for end users.
+        """
+        return self._config_entry.data.get(CONF_API_URI) or DEFAULT_API_URI
+
     def _get_base_url(self) -> str:
         """Get the best URL for Stripe redirect."""
         try:
@@ -188,6 +198,16 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
 
     # ── Main menu ────────────────────────────────────────────────
 
+    def _with_advanced(self, menu_options: dict[str, str]) -> dict[str, str]:
+        """Append the advanced entry to a menu when advanced options are on.
+
+        The advanced API endpoint override is a QA-only affordance — end
+        users don't see it because show_advanced_options is off by default.
+        """
+        if self.show_advanced_options:
+            return {**menu_options, "advanced": "Advanced (API endpoint)"}
+        return menu_options
+
     async def async_step_init(self, user_input=None):
         """Check login status and show the correct UI."""
         config_data = self._config_entry.data
@@ -200,28 +220,72 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
             if sub_status in SUBSCRIPTION_INVALID_STATES:
                 return self.async_show_menu(
                     step_id="init",
-                    menu_options={
-                        "subscribe": "Resubscribe",
-                        "cloud_status": "Cloud Connection Status",
-                        "logout": "Logout",
-                    },
+                    menu_options=self._with_advanced(
+                        {
+                            "subscribe": "Resubscribe",
+                            "cloud_status": "Cloud Connection Status",
+                            "logout": "Logout",
+                        }
+                    ),
                 )
 
             # "view_status" (Subscription Status) is hidden while billing is
             # parked; restore the entry here when Stripe payments return.
             return self.async_show_menu(
                 step_id="init",
-                menu_options={
-                    "cloud_status": "Cloud Connection Status",
-                    "logout": "Logout",
-                },
+                menu_options=self._with_advanced(
+                    {
+                        "cloud_status": "Cloud Connection Status",
+                        "logout": "Logout",
+                    }
+                ),
             )
 
         return self.async_show_menu(
             step_id="init",
-            menu_options={
-                "login": "Login to Ezlo Cloud",
-                "signup": "Create a New Account",
+            menu_options=self._with_advanced(
+                {
+                    "login": "Login to Ezlo Cloud",
+                    "signup": "Create a New Account",
+                }
+            ),
+        )
+
+    # ── Advanced (QA API endpoint override) ──────────────────────
+
+    async def async_step_advanced(self, user_input=None):
+        """QA-only: override the Ezlo Cloud API endpoint for this entry.
+
+        Gated by show_advanced_options. Default value is the current entry
+        override or DEFAULT_API_URI. Submitting an empty value clears the
+        override (back to default).
+        """
+        if not self.show_advanced_options:
+            return self.async_abort(reason="advanced_disabled")
+
+        if user_input is not None:
+            api_uri = (user_input.get(CONF_API_URI) or "").strip()
+            new_data = self._config_entry.data.copy()
+            if api_uri:
+                new_data[CONF_API_URI] = api_uri
+            else:
+                new_data.pop(CONF_API_URI, None)
+            self.hass.config_entries.async_update_entry(
+                self._config_entry, data=new_data
+            )
+            return self.async_abort(reason="config_saved")
+
+        current = self._get_api_uri()
+        return self.async_show_form(
+            step_id="advanced",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_API_URI, default=current): str,
+                }
+            ),
+            description_placeholders={
+                "current_api_uri": current,
+                "default_api_uri": DEFAULT_API_URI,
             },
         )
 
@@ -323,7 +387,11 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                 system_uuid = ""
                 _LOGGER.warning("Home Assistant system_uuid missing!")
             auth_response = await authenticate(
-                self.hass, username, password, system_uuid
+                self.hass,
+                username,
+                password,
+                system_uuid,
+                api_uri=self._get_api_uri(),
             )
 
             if auth_response["success"]:
@@ -434,7 +502,12 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                 _LOGGER.warning("Home Assistant system_uuid missing!")
 
             signup_response = await signup(
-                self.hass, username, email, password, system_uuid
+                self.hass,
+                username,
+                email,
+                password,
+                system_uuid,
+                api_uri=self._get_api_uri(),
             )
 
             if signup_response.get("success") and "data" in signup_response:
@@ -538,7 +611,7 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
         # id comes from the backend so we don't have to redeploy clients
         # when it changes.
         if not checkout_url:
-            cfg = await get_integration_config(self.hass)
+            cfg = await get_integration_config(self.hass, api_uri=self._get_api_uri())
             price_id = (cfg or {}).get("stripe_price_id")
             if not price_id:
                 _LOGGER.error("Could not load integration config (price_id missing)")
@@ -548,7 +621,11 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                 f"{self._get_base_url()}/config/integrations/integration/ezlohacloud"
             )
             stripe_response = await create_stripe_session(
-                self.hass, user_uuid, price_id, back_url
+                self.hass,
+                user_uuid,
+                price_id,
+                back_url,
+                api_uri=self._get_api_uri(),
             )
             if stripe_response.get("success"):
                 checkout_url = stripe_response.get("data", {}).get("checkout_url")
@@ -617,6 +694,7 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                 hass=self.hass,
                 uuid=user_info["uuid"],
                 token=token,
+                api_uri=self._get_api_uri(),
             )
             updated_data = self._config_entry.data.copy()
             updated_data["server_name"] = frp_info.get("server_name", "")
@@ -650,7 +728,9 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
         attempts = timeout // interval
         for _ in range(attempts):
             await asyncio.sleep(interval)
-            status_response = await get_subscription_status(self.hass, user_uuid)
+            status_response = await get_subscription_status(
+                self.hass, user_uuid, api_uri=self._get_api_uri()
+            )
 
             if not status_response.get("success"):
                 continue
@@ -685,7 +765,9 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
         trial_info = ""
 
         if user_uuid:
-            status_response = await get_subscription_status(self.hass, user_uuid)
+            status_response = await get_subscription_status(
+                self.hass, user_uuid, api_uri=self._get_api_uri()
+            )
             if status_response.get("success"):
                 status = status_response.get("status", "unknown").capitalize()
                 is_active = status_response.get("is_active")

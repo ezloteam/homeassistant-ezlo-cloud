@@ -61,9 +61,9 @@ def _mock_client_with_error(error: Exception) -> MagicMock:
 @pytest.fixture(autouse=True)
 def _clear_integration_config_cache() -> None:
     """Reset the module-level cache between tests."""
-    api._INTEGRATION_CONFIG_CACHE = None
+    api._INTEGRATION_CONFIG_CACHE.clear()
     yield
-    api._INTEGRATION_CONFIG_CACHE = None
+    api._INTEGRATION_CONFIG_CACHE.clear()
 
 
 # ── decode_jwt_payload ──────────────────────────────────────────────
@@ -496,3 +496,102 @@ async def test_get_integration_config_error_not_cached(
         return_value=success_client,
     ):
         assert await get_integration_config(hass) == {"stripe_price_id": "price_123"}
+
+
+# ── api_uri override ─────────────────────────────────────────────────
+
+
+_DEV_API = "https://api-dev.harc.cloud"
+
+
+async def test_authenticate_uses_api_uri_override(hass: HomeAssistant) -> None:
+    """authenticate(api_uri=...) targets the override host, not the default."""
+    token = _make_jwt({"uuid": USER_UUID, "ezlo_user_id": EZLO_USER_ID})
+    client = _mock_client_with_response(json_data={"token": token})
+    with patch(
+        "homeassistant.components.ezlohacloud.api.create_async_httpx_client",
+        return_value=client,
+    ):
+        await authenticate(hass, "u", "pw", "ha-uuid", api_uri=_DEV_API)
+
+    called_url = client.post.await_args.args[0]
+    assert called_url == f"{_DEV_API}/api/auth/login"
+
+
+async def test_signup_uses_api_uri_override(hass: HomeAssistant) -> None:
+    """signup(api_uri=...) targets the override host."""
+    token = _make_jwt({"uuid": USER_UUID, "ezlo_user_id": EZLO_USER_ID})
+    client = _mock_client_with_response(
+        json_data={"token": token, "payment_required": False}
+    )
+    with patch(
+        "homeassistant.components.ezlohacloud.api.create_async_httpx_client",
+        return_value=client,
+    ):
+        await signup(hass, "u", "u@x.com", "pw", "ha-uuid", api_uri=_DEV_API)
+
+    assert client.post.await_args.args[0] == f"{_DEV_API}/api/auth/signup"
+
+
+async def test_create_stripe_session_uses_api_uri_override(
+    hass: HomeAssistant,
+) -> None:
+    """create_stripe_session(api_uri=...) targets the override host."""
+    client = _mock_client_with_response(
+        json_data={"status": True, "data": {"checkout_url": "https://x"}}
+    )
+    with patch(
+        "homeassistant.components.ezlohacloud.api.create_async_httpx_client",
+        return_value=client,
+    ):
+        await create_stripe_session(
+            hass, USER_UUID, "price", "https://back", api_uri=_DEV_API
+        )
+
+    assert client.post.await_args.args[0] == f"{_DEV_API}/api/stripe/create-session"
+
+
+async def test_get_subscription_status_uses_api_uri_override(
+    hass: HomeAssistant,
+) -> None:
+    """get_subscription_status(api_uri=...) targets the override host."""
+    client = _mock_client_with_response(
+        json_data={"data": {"status": "active", "is_active": True}}
+    )
+    with patch(
+        "homeassistant.components.ezlohacloud.api.create_async_httpx_client",
+        return_value=client,
+    ):
+        await get_subscription_status(hass, USER_UUID, api_uri=_DEV_API)
+
+    assert client.get.await_args.args[0] == f"{_DEV_API}/api/subscription/status"
+
+
+async def test_get_integration_config_cache_is_per_api_uri(
+    hass: HomeAssistant,
+) -> None:
+    """The cache must not return prod data to a dev-override caller (or vice versa)."""
+    prod_client = _mock_client_with_response(
+        json_data={"data": {"stripe_price_id": "price_prod"}}
+    )
+    dev_client = _mock_client_with_response(
+        json_data={"data": {"stripe_price_id": "price_dev"}}
+    )
+
+    with patch(
+        "homeassistant.components.ezlohacloud.api.create_async_httpx_client",
+        return_value=prod_client,
+    ):
+        prod = await get_integration_config(hass)
+
+    with patch(
+        "homeassistant.components.ezlohacloud.api.create_async_httpx_client",
+        return_value=dev_client,
+    ):
+        dev = await get_integration_config(hass, api_uri=_DEV_API)
+
+    assert prod == {"stripe_price_id": "price_prod"}
+    assert dev == {"stripe_price_id": "price_dev"}
+    # Each api_uri triggered exactly one network call (no cross-pollution)
+    assert prod_client.get.await_count == 1
+    assert dev_client.get.await_count == 1

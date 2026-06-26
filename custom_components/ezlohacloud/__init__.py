@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from .api import SubscriptionExpiredError
-from .const import DOMAIN, SUBSCRIPTION_CANCELED
+from .const import CONF_API_URI, DEFAULT_API_URI, DOMAIN, SUBSCRIPTION_CANCELED
 from .frp_helpers import fetch_and_update_frp_config, start_frpc, stop_frpc
 from .utils import ensure_trusted_proxy_config
 
@@ -194,7 +194,10 @@ async def setup_frpc_configuration(
                 "Please restart Home Assistant for remote access to work"
             )
 
-        await fetch_and_update_frp_config(hass=hass, uuid=uuid, token=token)
+        api_uri = entry.data.get(CONF_API_URI) or DEFAULT_API_URI
+        await fetch_and_update_frp_config(
+            hass=hass, uuid=uuid, token=token, api_uri=api_uri
+        )
         await start_frpc(hass=hass, config_entry=entry)
     except SubscriptionExpiredError:
         _LOGGER.warning(

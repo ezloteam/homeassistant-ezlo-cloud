@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from homeassistant.components.ezlohacloud.const import (
+    CONF_API_URI,
+    DEFAULT_API_URI,
     DOMAIN,
     SUBSCRIPTION_ACTIVE,
     SUBSCRIPTION_CANCELED,
@@ -677,3 +679,93 @@ async def test_view_status_active_no_resubscribe(
         result = await handler.async_step_view_status()
     assert "subscribe" not in result["menu_options"]
     assert "init" in result["menu_options"]
+
+
+# ── Advanced API endpoint override ──────────────────────────────────
+
+
+def test_get_api_uri_defaults_when_not_set(
+    handler: EzloOptionsFlowHandler,
+) -> None:
+    """Without an override in entry data, _get_api_uri returns DEFAULT_API_URI."""
+    assert handler._get_api_uri() == DEFAULT_API_URI
+
+
+def test_get_api_uri_returns_override_when_set(
+    hass: HomeAssistant,
+    configured_entry: ConfigEntry,
+    handler: EzloOptionsFlowHandler,
+) -> None:
+    """When entry data has CONF_API_URI, that value is returned."""
+    dev_api = "https://api-dev.harc.cloud"
+    hass.config_entries.async_update_entry(
+        configured_entry, data={**configured_entry.data, CONF_API_URI: dev_api}
+    )
+    assert handler._get_api_uri() == dev_api
+
+
+async def test_advanced_step_hidden_when_advanced_options_off(
+    hass: HomeAssistant, configured_entry: ConfigEntry
+) -> None:
+    """The advanced menu entry is suppressed when show_advanced_options is False."""
+    result = await hass.config_entries.options.async_init(
+        configured_entry.entry_id, context={"show_advanced_options": False}
+    )
+    assert result["type"] is FlowResultType.MENU
+    assert "advanced" not in result["menu_options"]
+
+
+async def test_advanced_step_visible_when_advanced_options_on(
+    hass: HomeAssistant, configured_entry: ConfigEntry
+) -> None:
+    """The advanced menu entry appears when show_advanced_options is True."""
+    result = await hass.config_entries.options.async_init(
+        configured_entry.entry_id, context={"show_advanced_options": True}
+    )
+    assert result["type"] is FlowResultType.MENU
+    assert "advanced" in result["menu_options"]
+
+
+async def test_advanced_step_persists_override(
+    hass: HomeAssistant, configured_entry: ConfigEntry
+) -> None:
+    """Submitting the advanced form writes CONF_API_URI into entry data."""
+    dev_api = "https://api-dev.harc.cloud"
+    result = await hass.config_entries.options.async_init(
+        configured_entry.entry_id, context={"show_advanced_options": True}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "advanced"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "advanced"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_API_URI: dev_api}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "config_saved"
+    assert configured_entry.data[CONF_API_URI] == dev_api
+
+
+async def test_advanced_step_clearing_field_removes_override(
+    hass: HomeAssistant, configured_entry: ConfigEntry
+) -> None:
+    """Submitting an empty api_uri removes the override (revert to default)."""
+    hass.config_entries.async_update_entry(
+        configured_entry,
+        data={**configured_entry.data, CONF_API_URI: "https://api-dev.harc.cloud"},
+    )
+    result = await hass.config_entries.options.async_init(
+        configured_entry.entry_id, context={"show_advanced_options": True}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "advanced"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_API_URI: ""}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "config_saved"
+    assert CONF_API_URI not in configured_entry.data
+

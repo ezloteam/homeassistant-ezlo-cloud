@@ -10,7 +10,10 @@
         }
       },
       "confirm": {
-        "description": "[%key:common::config_flow::description::confirm_setup%]"
+        "description": "[%key:common::config_flow::description::confirm_setup%]",
+        "data": {
+          "api_uri": "Ezlo Cloud API endpoint (advanced — QA use only)"
+        }
       }
     },
     "abort": {
@@ -28,7 +31,15 @@
           "cloud_status": "Cloud connection status",
           "view_status": "Subscription status",
           "subscribe": "Resubscribe",
-          "logout": "Logout"
+          "logout": "Logout",
+          "advanced": "Advanced (API endpoint)"
+        }
+      },
+      "advanced": {
+        "title": "Advanced — API endpoint",
+        "description": "QA-only override. Leave as the default unless you are pointing this integration at a non-production Ezlo Cloud backend.\n\nCurrent: `{current_api_uri}`\nDefault: `{default_api_uri}`\n\nClear the field to revert to the default.",
+        "data": {
+          "api_uri": "API endpoint URL"
         }
       },
       "login": {
@@ -82,7 +93,8 @@
       "stripe_failed": "Could not start the checkout flow. Please try again later.",
       "config_unavailable": "Could not reach the Ezlo cloud to load checkout configuration. Please try again later.",
       "partner_trial_expired": "Your partner trial has expired. Please contact your account manager to extend access.",
-      "session_expired": "Your session has expired. Please log in again."
+      "session_expired": "Your session has expired. Please log in again.",
+      "advanced_disabled": "Advanced options are not enabled for this account."
     },
     "error": {
       "invalid_credentials": "Invalid username or password. Please try again.",

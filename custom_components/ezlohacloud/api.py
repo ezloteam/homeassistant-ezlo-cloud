@@ -10,13 +10,21 @@ import httpx
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.httpx_client import create_async_httpx_client
 
-from .const import EZLO_API_URI
+from .const import DEFAULT_API_URI
 
 _LOGGER = logging.getLogger(__name__)
 
-AUTH_API_URL = f"{EZLO_API_URI}/api/auth"
-STRIPE_API_URL = f"{EZLO_API_URI}/api/stripe"
-API_URL = f"{EZLO_API_URI}/api"
+
+def _auth_api_url(api_uri: str) -> str:
+    return f"{api_uri}/api/auth"
+
+
+def _stripe_api_url(api_uri: str) -> str:
+    return f"{api_uri}/api/stripe"
+
+
+def _api_url(api_uri: str) -> str:
+    return f"{api_uri}/api"
 
 
 class SubscriptionExpiredError(Exception):
@@ -27,7 +35,9 @@ def _raise_missing_uuid():
     raise ValueError("UUID missing in token payload")
 
 
-async def authenticate(hass: HomeAssistant, username, password, uuid):
+async def authenticate(
+    hass: HomeAssistant, username, password, uuid, *, api_uri: str = DEFAULT_API_URI
+):
     """Authenticate against Ezlo API (async)."""
     payload = {
         "username": username,
@@ -38,7 +48,9 @@ async def authenticate(hass: HomeAssistant, username, password, uuid):
 
     client = create_async_httpx_client(hass)
     try:
-        response = await client.post(f"{AUTH_API_URL}/login", json=payload, timeout=10)
+        response = await client.post(
+            f"{_auth_api_url(api_uri)}/login", json=payload, timeout=10
+        )
         response.raise_for_status()
         data = response.json()
         _LOGGER.info("Login response: %s", data)
@@ -93,7 +105,15 @@ async def authenticate(hass: HomeAssistant, username, password, uuid):
         return {"success": False, "data": None, "error": "API connection failed"}
 
 
-async def signup(hass: HomeAssistant, username, email, password, ha_instance_id):
+async def signup(
+    hass: HomeAssistant,
+    username,
+    email,
+    password,
+    ha_instance_id,
+    *,
+    api_uri: str = DEFAULT_API_URI,
+):
     """Send signup request to Go Auth API and return the response."""
     _LOGGER.info("Sending signup request to Auth API")
     payload = {
@@ -106,7 +126,9 @@ async def signup(hass: HomeAssistant, username, email, password, ha_instance_id)
 
     client = create_async_httpx_client(hass)
     try:
-        response = await client.post(f"{AUTH_API_URL}/signup", json=payload, timeout=5)
+        response = await client.post(
+            f"{_auth_api_url(api_uri)}/signup", json=payload, timeout=5
+        )
         response.raise_for_status()
         data = response.json()
 
@@ -150,7 +172,14 @@ async def signup(hass: HomeAssistant, username, email, password, ha_instance_id)
         return {"success": False, "data": None, "error": "Network error"}
 
 
-async def create_stripe_session(hass: HomeAssistant, user_id, price_id, back_ref_url):
+async def create_stripe_session(
+    hass: HomeAssistant,
+    user_id,
+    price_id,
+    back_ref_url,
+    *,
+    api_uri: str = DEFAULT_API_URI,
+):
     """Create a Stripe Checkout session."""
     _LOGGER.info("Creating Stripe checkout session for user: %s", user_id)
     payload = {
@@ -162,7 +191,7 @@ async def create_stripe_session(hass: HomeAssistant, user_id, price_id, back_ref
     client = create_async_httpx_client(hass)
     try:
         response = await client.post(
-            f"{STRIPE_API_URL}/create-session", json=payload, timeout=10
+            f"{_stripe_api_url(api_uri)}/create-session", json=payload, timeout=10
         )
         response.raise_for_status()
         data = response.json()
@@ -202,12 +231,14 @@ async def create_stripe_session(hass: HomeAssistant, user_id, price_id, back_ref
         return {"success": False, "data": None, "error": "Stripe checkout api error"}
 
 
-async def get_subscription_status(hass: HomeAssistant, user_uuid):
+async def get_subscription_status(
+    hass: HomeAssistant, user_uuid, *, api_uri: str = DEFAULT_API_URI
+):
     """Fetch subscription status from Ezlo backend."""
     client = create_async_httpx_client(hass)
     try:
         response = await client.get(
-            f"{API_URL}/subscription/status",
+            f"{_api_url(api_uri)}/subscription/status",
             params={"user_uuid": user_uuid},
             timeout=5,
         )
@@ -236,26 +267,30 @@ async def get_subscription_status(hass: HomeAssistant, user_uuid):
         return {"success": False, "error": "Network error"}
 
 
-_INTEGRATION_CONFIG_CACHE: dict | None = None
+_INTEGRATION_CONFIG_CACHE: dict[str, dict] = {}
 
 
-async def get_integration_config(hass: HomeAssistant) -> dict | None:
+async def get_integration_config(
+    hass: HomeAssistant, *, api_uri: str = DEFAULT_API_URI
+) -> dict | None:
     """Fetch public integration config (Stripe price id, etc.) from the backend.
 
-    Cached for the lifetime of the HA process — the values are static per
-    deployment and the call is cheap. Returns None on failure so callers can
-    surface a clean error.
+    Cached per-api_uri for the lifetime of the HA process — the values are
+    static per deployment and the call is cheap. Returns None on failure so
+    callers can surface a clean error.
     """
-    global _INTEGRATION_CONFIG_CACHE  # noqa: PLW0603  # pylint: disable=global-statement
-    if _INTEGRATION_CONFIG_CACHE is not None:
-        return _INTEGRATION_CONFIG_CACHE
+    cached = _INTEGRATION_CONFIG_CACHE.get(api_uri)
+    if cached is not None:
+        return cached
 
     client = create_async_httpx_client(hass)
     try:
-        response = await client.get(f"{API_URL}/integration/config", timeout=5)
+        response = await client.get(
+            f"{_api_url(api_uri)}/integration/config", timeout=5
+        )
         response.raise_for_status()
         data = response.json().get("data") or {}
-        _INTEGRATION_CONFIG_CACHE = data
+        _INTEGRATION_CONFIG_CACHE[api_uri] = data
         return data  # noqa: TRY300
     except (httpx.RequestError, httpx.HTTPStatusError) as e:
         _LOGGER.error("Failed to fetch integration config: %s", e)

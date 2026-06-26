@@ -183,6 +183,36 @@ async def test_fetch_and_update_frp_config_missing_server_config_key(
         await fetch_and_update_frp_config(hass, USER_UUID, API_TOKEN)
 
 
+async def test_fetch_and_update_frp_config_uses_api_uri_override(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    """fetch_and_update_frp_config(api_uri=...) hits the override host."""
+    config_path = tmp_path / "config" / "frpc.toml"
+    dev_api = "https://api-dev.harc.cloud"
+    session_mock = _make_aiohttp_session_mock(json_data=SERVER_CONFIG_RESPONSE)
+
+    with (
+        patch(
+            "homeassistant.components.ezlohacloud.frp_helpers.get_frp_config_path",
+            return_value=config_path,
+        ),
+        patch(
+            "homeassistant.components.ezlohacloud.frp_helpers.aiohttp.ClientSession",
+            session_mock,
+        ),
+    ):
+        await fetch_and_update_frp_config(
+            hass, USER_UUID, API_TOKEN, api_uri=dev_api
+        )
+
+    # The mock chain: ClientSession() -> __aenter__ -> session
+    # session.get(url, ...) is the call we want to inspect.
+    session_ctx = session_mock.return_value
+    session = session_ctx.__aenter__.return_value
+    called_url = session.get.call_args.args[0]
+    assert called_url == f"{dev_api}/api/user/{USER_UUID}/server-config"
+
+
 async def test_fetch_and_update_frp_config_no_tunnel_token(
     hass: HomeAssistant, tmp_path: Path
 ) -> None:

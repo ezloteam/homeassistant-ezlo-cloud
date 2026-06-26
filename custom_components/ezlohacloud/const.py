@@ -5,7 +5,12 @@ DOMAIN = "ezlohacloud"
 STORAGE_KEY = "ezlo_user_data"
 STORAGE_VERSION = 1
 
-EZLO_API_URI = "https://api.harc.cloud"
+# Default Ezlo HA Cloud API endpoint. Overridable per-entry via CONF_API_URI
+# (advanced config-flow option) so QA can point at api-dev.harc.cloud without
+# forking the integration.
+DEFAULT_API_URI = "https://api.harc.cloud"
+CONF_API_URI = "api_uri"
+
 HOMEASSISTANT_HOST = "homeassistant.local"
 
 # Subscription status values (from Stripe)

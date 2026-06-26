@@ -12,7 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .api import SubscriptionExpiredError
-from .const import DOMAIN, EZLO_API_URI
+from .const import DEFAULT_API_URI, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,7 +28,11 @@ def get_frp_binary_path() -> Path:
 
 
 async def fetch_and_update_frp_config(
-    hass: HomeAssistant, uuid: str, token: str
+    hass: HomeAssistant,
+    uuid: str,
+    token: str,
+    *,
+    api_uri: str = DEFAULT_API_URI,
 ) -> dict:
     """Fetch and update the frp client config.
 
@@ -42,7 +46,7 @@ async def fetch_and_update_frp_config(
         async with (
             aiohttp.ClientSession() as session,
             session.get(
-                f"{EZLO_API_URI}/api/user/{uuid}/server-config",
+                f"{api_uri}/api/user/{uuid}/server-config",
                 timeout=ClientTimeout(total=10),
                 headers={"Authorization": f"Bearer {token}"},
             ) as response,
