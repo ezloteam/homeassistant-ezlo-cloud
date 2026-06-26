@@ -26,7 +26,7 @@ TUNNEL_TOKEN = "tunnel-token-12345"
 
 SERVER_CONFIG_RESPONSE = {
     "serverConfig": {
-        "serverName": "frp-plugin-dev.ezlo.com",
+        "serverName": "frp-dev.harc.cloud",
         "serverAddr": "152.42.152.93",
         "serverPort": 7000,
         "auth": {"token": TUNNEL_TOKEN},
@@ -35,7 +35,7 @@ SERVER_CONFIG_RESPONSE = {
                 "name": "proxy-tcp-tunnel-user1",
                 "type": "http",
                 "localPort": 8123,
-                "subdomain": f"abc123:{TUNNEL_TOKEN}.frp-plugin-dev.ezlo.com",
+                "subdomain": f"abc123:{TUNNEL_TOKEN}.frp-dev.harc.cloud",
             }
         ],
     }
@@ -104,10 +104,10 @@ async def test_fetch_and_update_frp_config_writes_toml(
     assert '"metadatas.token"' not in contents  # not quoted
     # Subdomain split at colon — only the hash part
     assert 'subdomain = "abc123"' in contents
-    assert f"{TUNNEL_TOKEN}.frp-plugin-dev" not in contents
+    assert f"{TUNNEL_TOKEN}.frp-dev" not in contents
 
     # Returned info
-    assert result["server_name"] == "frp-plugin-dev.ezlo.com"
+    assert result["server_name"] == "frp-dev.harc.cloud"
     assert result["subdomain"] == "abc123"
 
 
@@ -353,3 +353,36 @@ async def test_async_unload_entry_force_kill_on_timeout(hass: HomeAssistant) -> 
 
     process.terminate.assert_called_once()
     process.kill.assert_called_once()
+
+
+# ── Regression guard ────────────────────────────────────────────────
+
+
+def test_no_legacy_frp_endpoints_in_shipped_code() -> None:
+    """Shipped code must not hard-code the retired frp-plugin*.ezlo.com hosts.
+
+    All FRP server details (serverAddr, serverPort, serverName, proxy
+    subdomains) come from harc-api at runtime via
+    fetch_and_update_frp_config. Any hard-coded reference to the retired
+    frp-plugin.ezlo.com / frp-plugin-dev.ezlo.com hosts is a bug, since
+    harc-api now returns the *.harc.cloud convention.
+    """
+    pkg_root = Path(__file__).resolve().parent.parent
+    forbidden = ("frp-plugin.ezlo.com", "frp-plugin-dev.ezlo.com")
+    patterns = ("*.py", "*.json", "*.toml", "*.yaml", "*.yml")
+    skip_dirs = {"tests", "config", "bin", "__pycache__"}
+
+    offenders: list[str] = []
+    for pattern in patterns:
+        for path in pkg_root.rglob(pattern):
+            rel = path.relative_to(pkg_root)
+            if rel.parts and rel.parts[0] in skip_dirs:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for token in forbidden:
+                if token in text:
+                    offenders.append(f"{rel}: {token}")
+
+    assert not offenders, (
+        f"Legacy FRP hostnames found in shipped code: {offenders}"
+    )
