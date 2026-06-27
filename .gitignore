@@ -1,2 +1,11 @@
-
 *.pyc
+__pycache__/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.sync-conflict-*
+.DS_Store

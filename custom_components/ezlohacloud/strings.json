@@ -4,16 +4,58 @@
       "user": {
         "title": "Set Up Ezlo HA Cloud",
         "description": "This integration enables secure remote access to your Home Assistant instance via Ezlo Cloud.",
+        "menu_options": {
+          "login": "Log in",
+          "signup": "Create a new account"
+        }
+      },
+      "login": {
+        "title": "Log in to Ezlo Cloud",
+        "description": "Enter your Ezlo Cloud credentials to enable remote access.\n\n{error_detail}",
         "data": {
-          "username": "Username",
-          "password": "Password"
+          "username": "[%key:common::config_flow::data::username%]",
+          "password": "[%key:common::config_flow::data::password%]"
+        }
+      },
+      "signup": {
+        "title": "Create an Ezlo Cloud Account",
+        "description": "Create a new account to start a **free trial** of Ezlo Cloud remote access.\n\n{error_detail}",
+        "data": {
+          "username": "[%key:common::config_flow::data::username%]",
+          "email": "[%key:common::config_flow::data::email%]",
+          "password": "[%key:common::config_flow::data::password%]"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate with Ezlo Cloud",
+        "description": "Your Ezlo Cloud session has expired. Enter your credentials to restore remote access.\n\n{error_detail}",
+        "data": {
+          "username": "[%key:common::config_flow::data::username%]",
+          "password": "[%key:common::config_flow::data::password%]"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Ezlo Cloud",
+        "description": "Update the credentials used to connect to Ezlo Cloud.\n\n{error_detail}",
+        "data": {
+          "username": "[%key:common::config_flow::data::username%]",
+          "password": "[%key:common::config_flow::data::password%]"
         }
       }
     },
     "abort": {
       "single_instance_allowed": "[%key:common::config_flow::abort::single_instance_allowed%]",
       "no_devices_found": "[%key:common::config_flow::abort::no_devices_found%]",
-      "already_configured": "[%key:common::config_flow::abort::already_configured_service%]"
+      "already_configured": "[%key:common::config_flow::abort::already_configured_service%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+      "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+    },
+    "error": {
+      "invalid_credentials": "Invalid username or password. Please try again.",
+      "device_already_bound": "This Home Assistant installation is already linked to a different Ezlo Cloud account. Sign out from the other account, or contact support to release the binding.",
+      "signup_failed": "Account creation failed. Please try again.",
+      "network_error": "Unable to reach Ezlo Cloud. Please check your internet connection.",
+      "unknown": "An unexpected error occurred. Please try again."
     }
   },
   "options": {
@@ -97,6 +139,44 @@
       "stripe_failed": "Could not create payment session. Please try again later.",
       "network_error": "Unable to reach Ezlo Cloud. Please check your internet connection.",
       "unknown": "An unexpected error occurred. Please try again."
+    }
+  },
+  "exceptions": {
+    "auth_failed": {
+      "message": "Authentication with Ezlo Cloud failed. Please log in again."
+    },
+    "subscription_expired": {
+      "message": "Your Ezlo Cloud subscription has expired. Please resubscribe via the integration options."
+    },
+    "subscription_invalid": {
+      "message": "Your Ezlo Cloud subscription is not active (status: {status}). Please resubscribe via the integration options."
+    },
+    "missing_uuid": {
+      "message": "The Ezlo Cloud token is missing a user identifier."
+    },
+    "frpc_install_failed": {
+      "message": "Failed to install the FRPC tunnel binary: {detail}"
+    },
+    "frpc_checksum_mismatch": {
+      "message": "The downloaded FRPC tunnel binary failed integrity verification: {detail}"
+    },
+    "frpc_unsupported_arch": {
+      "message": "Unsupported system architecture: {arch}. Supported: {supported}."
+    },
+    "frpc_setup_failed": {
+      "message": "Failed to set up the FRPC tunnel: {detail}"
+    },
+    "api_unreachable": {
+      "message": "Could not reach the Ezlo Cloud API: {detail}"
+    },
+    "api_unexpected_response": {
+      "message": "Ezlo Cloud API returned an unexpected response: {detail}"
+    }
+  },
+  "issues": {
+    "restart_required_for_trusted_proxies": {
+      "title": "Add the trusted_proxies block to configuration.yaml",
+      "description": "Ezlo HA Cloud needs the Home Assistant HTTP component to trust the local frpc reverse proxy. Add the following block to your `configuration.yaml` and restart Home Assistant:\n\n```yaml\nhttp:\n  use_x_forwarded_for: true\n  trusted_proxies:\n    - 127.0.0.1\n```\n\nThis issue will close automatically the next time the integration loads and sees the block."
     }
   }
 }

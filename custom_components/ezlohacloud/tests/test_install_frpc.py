@@ -1,38 +1,37 @@
-"""Tests for the FRPC binary install/check logic in __init__.py."""
+"""Tests for the FRPC binary install + sha256 verification logic."""
 
 from __future__ import annotations
 
+import hashlib
 import io
-from pathlib import Path
 import tarfile
+from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from homeassistant.core import HomeAssistant
 
-from homeassistant.components.ezlohacloud import (
-    FrpcInstallError,
-    _sync_install_frpc,
+from custom_components.ezlohacloud import (
+    _extract_frpc_binary,
     check_binary_current,
-    get_system_architecture,
     install_frpc,
 )
-from homeassistant.core import HomeAssistant
+from custom_components.ezlohacloud.exceptions import (
+    FrpcChecksumError,
+    FrpcInstallError,
+)
 
 VERSION = "0.61.0"
 MACHINE = "amd64"
 
 
-def _build_tarball(*, include_frpc: bool = True, arch: str = MACHINE) -> bytes:
-    """Build an in-memory frp release tarball mimicking the GitHub layout.
-
-    The real release format is `frp_<ver>_linux_<arch>/frpc` plus other files.
-    Set include_frpc=False to simulate a corrupt/wrong release.
-    """
+def _build_tarball(*, include_frpc: bool = True) -> bytes:
+    """Build an in-memory frp release tarball mimicking the GitHub layout."""
     buffer = io.BytesIO()
-    folder = f"frp_{VERSION}_linux_{arch}"
+    folder = f"frp_{VERSION}_linux_{MACHINE}"
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
-        # Always include a readme so the tarball isn't empty
         readme = b"frp release\n"
         readme_info = tarfile.TarInfo(name=f"{folder}/README.md")
         readme_info.size = len(readme)
@@ -48,52 +47,39 @@ def _build_tarball(*, include_frpc: bool = True, arch: str = MACHINE) -> bytes:
     return buffer.getvalue()
 
 
-def _mock_httpx_stream(payload: bytes) -> MagicMock:
-    """Return a MagicMock that emulates httpx.stream() as a context manager."""
+class _AsyncByteStream:
+    """Async iterator yielding fixed byte chunks for httpx.stream().aiter_bytes()."""
+
+    def __init__(self, payload: bytes, chunk_size: int = 8192) -> None:
+        self._payload = payload
+        self._chunk_size = chunk_size
+
+    def __aiter__(self) -> _AsyncByteStream:
+        self._offset = 0
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self._offset >= len(self._payload):
+            raise StopAsyncIteration
+        chunk = self._payload[self._offset : self._offset + self._chunk_size]
+        self._offset += self._chunk_size
+        return chunk
+
+
+def _patch_client_stream(payload: bytes | None, *, raise_for_status: Any = None) -> MagicMock:
+    """Build a mock httpx client whose stream() yields the given bytes."""
     response = MagicMock()
-    response.raise_for_status = MagicMock()
-    response.iter_bytes = MagicMock(return_value=[payload])
-    cm = MagicMock()
-    cm.__enter__ = MagicMock(return_value=response)
-    cm.__exit__ = MagicMock(return_value=False)
-    return cm
+    response.raise_for_status = MagicMock(side_effect=raise_for_status) if raise_for_status else MagicMock()
+    if payload is not None:
+        response.aiter_bytes = MagicMock(return_value=_AsyncByteStream(payload))
 
+    stream_ctx = MagicMock()
+    stream_ctx.__aenter__ = AsyncMock(return_value=response)
+    stream_ctx.__aexit__ = AsyncMock(return_value=False)
 
-# ── get_system_architecture ─────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    ("machine", "expected"),
-    [
-        ("x86_64", "amd64"),
-        ("aarch64", "arm64"),
-        ("armv7l", "arm"),
-        ("armv6l", "arm"),
-        ("i686", "386"),
-        ("X86_64", "amd64"),  # case-insensitive
-    ],
-)
-async def test_get_system_architecture_known(
-    hass: HomeAssistant, machine: str, expected: str
-) -> None:
-    """Known architectures resolve to the expected mapping."""
-    with patch(
-        "homeassistant.components.ezlohacloud.platform.machine",
-        return_value=machine,
-    ):
-        assert await get_system_architecture(hass) == expected
-
-
-async def test_get_system_architecture_unsupported(hass: HomeAssistant) -> None:
-    """Unsupported architecture raises FrpcInstallError."""
-    with (
-        patch(
-            "homeassistant.components.ezlohacloud.platform.machine",
-            return_value="riscv64",
-        ),
-        pytest.raises(FrpcInstallError, match="Unsupported architecture"),
-    ):
-        await get_system_architecture(hass)
+    client = MagicMock()
+    client.stream = MagicMock(return_value=stream_ctx)
+    return client
 
 
 # ── check_binary_current ────────────────────────────────────────────
@@ -140,121 +126,179 @@ async def test_check_binary_current_oserror(tmp_path: Path) -> None:
         assert await check_binary_current(binary, VERSION) is False
 
 
-# ── _sync_install_frpc ──────────────────────────────────────────────
+# ── _extract_frpc_binary ────────────────────────────────────────────
 
 
-def test_sync_install_frpc_success(tmp_path: Path) -> None:
-    """Successful download and extraction writes binary and returns its path."""
-    binary_path = tmp_path / "bin" / "frpc"
-    binary_path.parent.mkdir(parents=True, exist_ok=True)
+def test_extract_frpc_binary_success(tmp_path: Path) -> None:
+    """A well-formed tarball is extracted, copied, and chmod'd 0o755."""
+    binary_path = tmp_path / "out" / "frpc"
+    binary_path.parent.mkdir(parents=True)
+    tar_path = tmp_path / "release.tar.gz"
+    tar_path.write_bytes(_build_tarball())
 
-    tarball = _build_tarball()
-    with patch(
-        "homeassistant.components.ezlohacloud.httpx.stream",
-        return_value=_mock_httpx_stream(tarball),
-    ):
-        result = _sync_install_frpc(VERSION, MACHINE, binary_path)
+    _extract_frpc_binary(tar_path, binary_path, str(tmp_path))
 
-    assert Path(result) == binary_path
     assert binary_path.is_file()
-    # Binary is marked executable
-    assert binary_path.stat().st_mode & 0o111
+    assert binary_path.stat().st_mode & 0o111  # executable bit set
 
 
-def test_sync_install_frpc_download_failure(tmp_path: Path) -> None:
-    """HTTP errors during download are wrapped in FrpcInstallError."""
-    binary_path = tmp_path / "bin" / "frpc"
-    binary_path.parent.mkdir(parents=True, exist_ok=True)
+def test_extract_frpc_binary_no_frpc_inside(tmp_path: Path) -> None:
+    """A tarball without an frpc member raises FrpcInstallError."""
+    binary_path = tmp_path / "out" / "frpc"
+    binary_path.parent.mkdir(parents=True)
+    tar_path = tmp_path / "release.tar.gz"
+    tar_path.write_bytes(_build_tarball(include_frpc=False))
 
-    response = MagicMock()
-    response.raise_for_status = MagicMock(
-        side_effect=httpx.HTTPStatusError(
-            "404", request=MagicMock(), response=MagicMock(status_code=404)
-        )
-    )
-    cm = MagicMock()
-    cm.__enter__ = MagicMock(return_value=response)
-    cm.__exit__ = MagicMock(return_value=False)
-
-    with (
-        patch(
-            "homeassistant.components.ezlohacloud.httpx.stream",
-            return_value=cm,
-        ),
-        pytest.raises(FrpcInstallError, match="Download failed"),
-    ):
-        _sync_install_frpc(VERSION, MACHINE, binary_path)
+    with pytest.raises(FrpcInstallError, match="No frpc binary"):
+        _extract_frpc_binary(tar_path, binary_path, str(tmp_path))
 
 
-def test_sync_install_frpc_missing_frpc_in_archive(tmp_path: Path) -> None:
-    """A release tarball without frpc inside raises FrpcInstallError."""
-    binary_path = tmp_path / "bin" / "frpc"
-    binary_path.parent.mkdir(parents=True, exist_ok=True)
+def test_extract_frpc_binary_corrupt_archive(tmp_path: Path) -> None:
+    """A non-gzip payload raises FrpcInstallError."""
+    binary_path = tmp_path / "out" / "frpc"
+    binary_path.parent.mkdir(parents=True)
+    tar_path = tmp_path / "release.tar.gz"
+    tar_path.write_bytes(b"not a real tarball")
 
-    tarball = _build_tarball(include_frpc=False)
-    with (
-        patch(
-            "homeassistant.components.ezlohacloud.httpx.stream",
-            return_value=_mock_httpx_stream(tarball),
-        ),
-        pytest.raises(FrpcInstallError, match="No frpc binary"),
-    ):
-        _sync_install_frpc(VERSION, MACHINE, binary_path)
+    with pytest.raises(FrpcInstallError, match="Extraction failed"):
+        _extract_frpc_binary(tar_path, binary_path, str(tmp_path))
 
 
-def test_sync_install_frpc_extraction_failure(tmp_path: Path) -> None:
-    """Corrupt archive (not a real tar.gz) raises FrpcInstallError."""
-    binary_path = tmp_path / "bin" / "frpc"
-    binary_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with (
-        patch(
-            "homeassistant.components.ezlohacloud.httpx.stream",
-            return_value=_mock_httpx_stream(b"not a real tarball"),
-        ),
-        pytest.raises(FrpcInstallError, match="Extraction failed"),
-    ):
-        _sync_install_frpc(VERSION, MACHINE, binary_path)
-
-
-# ── install_frpc (orchestration) ────────────────────────────────────
+# ── install_frpc ─────────────────────────────────────────────────────
 
 
 async def test_install_frpc_skips_download_when_current(
-    hass: HomeAssistant,
+    hass: HomeAssistant, tmp_path: Path
 ) -> None:
     """If check_binary_current returns True, no download is attempted."""
     with (
         patch(
-            "homeassistant.components.ezlohacloud.check_binary_current",
+            "custom_components.ezlohacloud.get_frp_binary_path",
+            return_value=tmp_path / "bin" / "frpc",
+        ),
+        patch(
+            "custom_components.ezlohacloud.check_binary_current",
             AsyncMock(return_value=True),
         ),
         patch(
-            "homeassistant.components.ezlohacloud._sync_install_frpc"
-        ) as sync_install,
+            "custom_components.ezlohacloud.get_async_client"
+        ) as get_client,
     ):
         result = await install_frpc(hass, VERSION, MACHINE)
 
-    sync_install.assert_not_called()
-    assert result.endswith("/bin/frpc")
+    get_client.assert_not_called()
+    assert result.endswith("bin/frpc")
 
 
-async def test_install_frpc_downloads_when_outdated(
+async def test_install_frpc_verifies_sha256(
     hass: HomeAssistant, tmp_path: Path
 ) -> None:
-    """If check_binary_current returns False, _sync_install_frpc is invoked."""
-    expected_path = "/fake/installed/frpc"
+    """A matching sha256 lets the install proceed and extract the binary."""
+    tarball = _build_tarball()
+    expected_sha = hashlib.sha256(tarball).hexdigest()
+    binary_path = tmp_path / "bin" / "frpc"
+
+    client = _patch_client_stream(tarball)
     with (
         patch(
-            "homeassistant.components.ezlohacloud.check_binary_current",
+            "custom_components.ezlohacloud.get_frp_binary_path",
+            return_value=binary_path,
+        ),
+        patch(
+            "custom_components.ezlohacloud.check_binary_current",
             AsyncMock(return_value=False),
         ),
         patch(
-            "homeassistant.components.ezlohacloud._sync_install_frpc",
-            return_value=expected_path,
-        ) as sync_install,
+            "custom_components.ezlohacloud.FRPC_SHA256",
+            {MACHINE: expected_sha},
+        ),
+        patch(
+            "custom_components.ezlohacloud.get_async_client", return_value=client
+        ),
     ):
         result = await install_frpc(hass, VERSION, MACHINE)
 
-    sync_install.assert_called_once()
-    assert result == expected_path
+    assert result == str(binary_path)
+    assert binary_path.is_file()
+
+
+async def test_install_frpc_sha256_mismatch_raises(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    """A bad sha256 raises FrpcChecksumError and does NOT extract the binary."""
+    tarball = _build_tarball()
+    binary_path = tmp_path / "bin" / "frpc"
+
+    client = _patch_client_stream(tarball)
+    with (
+        patch(
+            "custom_components.ezlohacloud.get_frp_binary_path",
+            return_value=binary_path,
+        ),
+        patch(
+            "custom_components.ezlohacloud.check_binary_current",
+            AsyncMock(return_value=False),
+        ),
+        patch(
+            "custom_components.ezlohacloud.FRPC_SHA256",
+            {MACHINE: "0" * 64},  # never matches
+        ),
+        patch(
+            "custom_components.ezlohacloud.get_async_client", return_value=client
+        ),
+        pytest.raises(FrpcChecksumError),
+    ):
+        await install_frpc(hass, VERSION, MACHINE)
+
+    assert not binary_path.is_file()
+
+
+async def test_install_frpc_no_pinned_hash_raises(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    """An architecture missing from FRPC_SHA256 raises FrpcChecksumError."""
+    binary_path = tmp_path / "bin" / "frpc"
+    with (
+        patch(
+            "custom_components.ezlohacloud.get_frp_binary_path",
+            return_value=binary_path,
+        ),
+        patch(
+            "custom_components.ezlohacloud.check_binary_current",
+            AsyncMock(return_value=False),
+        ),
+        patch("custom_components.ezlohacloud.FRPC_SHA256", {}),
+        pytest.raises(FrpcChecksumError, match="No SHA-256 hash pinned"),
+    ):
+        await install_frpc(hass, VERSION, MACHINE)
+
+
+async def test_install_frpc_http_error_raises_install_error(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    """An HTTP error during download surfaces as FrpcInstallError."""
+    binary_path = tmp_path / "bin" / "frpc"
+    raise_for_status_exc = httpx.HTTPStatusError(
+        "404", request=MagicMock(), response=MagicMock(status_code=404)
+    )
+    client = _patch_client_stream(b"", raise_for_status=raise_for_status_exc)
+
+    with (
+        patch(
+            "custom_components.ezlohacloud.get_frp_binary_path",
+            return_value=binary_path,
+        ),
+        patch(
+            "custom_components.ezlohacloud.check_binary_current",
+            AsyncMock(return_value=False),
+        ),
+        patch(
+            "custom_components.ezlohacloud.FRPC_SHA256",
+            {MACHINE: "0" * 64},
+        ),
+        patch(
+            "custom_components.ezlohacloud.get_async_client", return_value=client
+        ),
+        pytest.raises(FrpcInstallError, match="Download failed"),
+    ):
+        await install_frpc(hass, VERSION, MACHINE)

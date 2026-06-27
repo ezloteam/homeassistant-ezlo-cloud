@@ -1,0 +1,70 @@
+[project]
+name = "ezlohacloud"
+version = "1.0.5"
+description = "Home Assistant integration that connects HA to Ezlo HA Cloud."
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "FA",  # future annotations
+    "RUF", # ruff-specific
+    "TCH", # flake8-type-checking
+    "ASYNC", # async/await
+]
+ignore = [
+    "E501",  # line too long
+    "B008",  # function call in default arg (homeassistant idiom)
+    "ASYNC240",  # pathlib in async is over-strict for cheap stat calls
+    "TC001",  # do not move first-party imports into TYPE_CHECKING (PEP 695 needs them at runtime)
+    "TC002",  # do not move third-party imports into TYPE_CHECKING
+    "TC003",  # do not move stdlib imports into TYPE_CHECKING
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["custom_components.ezlohacloud"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+namespace_packages = true
+explicit_package_bases = true
+files = ["custom_components/ezlohacloud"]
+exclude = ["custom_components/ezlohacloud/tests/"]
+
+[[tool.mypy.overrides]]
+module = "homeassistant.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tomlkit.*", "httpx.*", "aiohttp.*", "voluptuous"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["custom_components/ezlohacloud/tests"]
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["./custom_components/ezlohacloud"]
+omit = ["custom_components/ezlohacloud/tests/*"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]

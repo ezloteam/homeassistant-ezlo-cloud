@@ -1,30 +1,52 @@
-"""Ezlo HA Cloud integration helpers for Home Assistant."""
+"""Ezlo HA Cloud FRPC tunnel helpers.
 
+The tunnel is run as a child of the Home Assistant event loop via
+``asyncio.create_subprocess_exec`` and its lifecycle is tracked on the
+config entry's ``runtime_data`` (no ``hass.data`` use).
+"""
+
+from __future__ import annotations
+
+import asyncio
 import logging
+import os
 from pathlib import Path
-import subprocess
 
 import aiohttp
 from aiohttp import ClientTimeout
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from tomlkit import aot, document, dumps, table
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-
-from .api import SubscriptionExpiredError
-from .const import DEFAULT_API_URI, DOMAIN
+from .const import DEFAULT_API_URI
+from .exceptions import (
+    EzloApiUnexpectedResponseError,
+    EzloApiUnreachableError,
+    EzloSubscriptionExpiredError,
+    FrpcSetupError,
+)
+from .models import EzloConfigEntry, EzloRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def get_frp_config_path() -> Path:
-    """Return the frp client config path."""
-    return Path(__file__).parent / "config" / "frpc.toml"
+def get_frp_config_dir(hass: HomeAssistant) -> Path:
+    """Return the directory the FRPC config and binary live in.
+
+    Uses ``hass.config.path`` so the data survives HACS upgrades and so the
+    integration package directory stays read-only.
+    """
+    return Path(hass.config.path(".storage", "ezlohacloud"))
 
 
-def get_frp_binary_path() -> Path:
-    """Return the frp client binary path."""
-    return Path(__file__).parent / "bin" / "frpc"
+def get_frp_config_path(hass: HomeAssistant) -> Path:
+    """Return the frpc client config path."""
+    return get_frp_config_dir(hass) / "frpc.toml"
+
+
+def get_frp_binary_path(hass: HomeAssistant) -> Path:
+    """Return the frpc client binary path."""
+    return get_frp_config_dir(hass) / "bin" / "frpc"
 
 
 async def fetch_and_update_frp_config(
@@ -33,107 +55,95 @@ async def fetch_and_update_frp_config(
     token: str,
     *,
     api_uri: str = DEFAULT_API_URI,
-) -> dict:
-    """Fetch and update the frp client config.
+) -> dict[str, str]:
+    """Fetch the server-config from the backend and write the FRPC TOML.
 
-    Returns a dict with server_addr and subdomain for the first proxy.
+    Returns a dict with `server_name` and `subdomain` for the first proxy.
+
+    Raises:
+        EzloSubscriptionExpiredError: backend returned 402.
+        EzloApiUnreachableError: network failure.
+        EzloApiUnexpectedResponseError: malformed payload.
     """
-
-    config_path = get_frp_config_path()
+    config_path = get_frp_config_path(hass)
+    session = async_get_clientsession(hass)
 
     try:
-        # Fetch configuration from API
-        async with (
-            aiohttp.ClientSession() as session,
-            session.get(
-                f"{api_uri}/api/user/{uuid}/server-config",
-                timeout=ClientTimeout(total=10),
-                headers={"Authorization": f"Bearer {token}"},
-            ) as response,
-        ):
+        async with session.get(
+            f"{api_uri}/api/user/{uuid}/server-config",
+            timeout=ClientTimeout(total=10),
+            headers={"Authorization": f"Bearer {token}"},
+        ) as response:
+            if response.status == 402:
+                raise EzloSubscriptionExpiredError(
+                    "Your subscription has expired. Please subscribe to continue."
+                )
             response.raise_for_status()
             api_config = await response.json()
-
-        # Extract server configuration from nested structure
-        server_config = api_config["serverConfig"]
-
-        # Get tunnel token from server-config response (preferred)
-        tunnel_token = server_config.get("auth", {}).get("token", "")
-        _LOGGER.debug("Server-config auth section: %s", server_config.get("auth"))
-        if not tunnel_token:
-            _LOGGER.warning("No tunnel token in server-config response")
-
-        # Create TOML document with tomlkit
-        def _create_toml():
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            doc = document()
-
-            # Add server configuration
-            doc.add("serverAddr", server_config["serverAddr"])
-            doc.add("serverPort", server_config["serverPort"])
-
-            # Create array-of-tables for proxies
-            proxies = aot()
-            for proxy in server_config["proxies"]:
-                proxy_table = table()
-                proxy_table.add("name", proxy["name"])
-                proxy_table.add("type", proxy["type"])
-                proxy_table.add("localPort", proxy["localPort"])
-                # API returns "hash:server.domain" — only the hash is needed
-                subdomain_raw = proxy["subdomain"]
-                subdomain = (
-                    subdomain_raw.split(":")[0]
-                    if ":" in subdomain_raw
-                    else subdomain_raw
-                )
-                proxy_table.add("subdomain", subdomain)
-                proxies.append(proxy_table)
-
-            doc.add("proxies", proxies)
-
-            # Write to file
-            # tomlkit quotes dotted keys ("metadatas.token"), but frp
-            # requires the bare form: metadatas.token = "...".
-            # So we inject it as a raw line after the server fields.
-            toml_text = dumps(doc)
-            lines = toml_text.split("\n")
-            # Insert metadatas.token (tunnel token) after serverPort line
-            if tunnel_token:
-                meta_line = f'metadatas.token = "{tunnel_token}"'
-                insert_idx = next(
-                    (
-                        i + 1
-                        for i, line in enumerate(lines)
-                        if line.startswith("serverPort")
-                    ),
-                    2,
-                )
-                lines.insert(insert_idx, meta_line)
-            with open(config_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines))
-
-        await hass.async_add_executor_job(_create_toml)
-
-    except KeyError as err:
-        _LOGGER.error("Missing expected key in API response: %s", err)
-        raise
     except aiohttp.ClientResponseError as err:
-        if err.status == 402:
-            _LOGGER.warning("Subscription expired — cannot fetch FRP config")
-            raise SubscriptionExpiredError(
-                "Your subscription has expired. Please subscribe to continue."
-            ) from err
-        _LOGGER.error("API request failed (HTTP %s): %s", err.status, err.message)
-        raise
+        raise EzloApiUnreachableError(f"server-config HTTP {err.status}") from err
     except aiohttp.ClientError as err:
-        _LOGGER.error("API request failed: %s", err)
-        raise
-    except Exception as err:
-        _LOGGER.error("Configuration generation failed: %s", err)
-        raise
+        raise EzloApiUnreachableError(str(err)) from err
+    except TimeoutError as err:
+        raise EzloApiUnreachableError("server-config timed out") from err
 
-    # Return connection details for the config entry
-    first_proxy = server_config["proxies"][0] if server_config["proxies"] else {}
+    try:
+        server_config = api_config["serverConfig"]
+        proxies_in = server_config["proxies"]
+        server_addr = server_config["serverAddr"]
+        server_port = server_config["serverPort"]
+    except (KeyError, TypeError) as err:
+        raise EzloApiUnexpectedResponseError(f"server-config missing key: {err}") from err
+
+    tunnel_token = server_config.get("auth", {}).get("token", "")
+    if not tunnel_token:
+        _LOGGER.warning("No tunnel token in server-config response")
+
+    def _create_toml() -> None:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        doc = document()
+        doc.add("serverAddr", server_addr)
+        doc.add("serverPort", server_port)
+
+        proxies_table = aot()
+        for proxy in proxies_in:
+            proxy_table = table()
+            proxy_table.add("name", proxy["name"])
+            proxy_table.add("type", proxy["type"])
+            proxy_table.add("localPort", proxy["localPort"])
+            subdomain_raw = proxy["subdomain"]
+            subdomain = (
+                subdomain_raw.split(":")[0]
+                if ":" in subdomain_raw
+                else subdomain_raw
+            )
+            proxy_table.add("subdomain", subdomain)
+            proxies_table.append(proxy_table)
+        doc.add("proxies", proxies_table)
+
+        # tomlkit quotes dotted keys ("metadatas.token"), but frp requires
+        # the bare form. Inject the token line after serverPort.
+        toml_text = dumps(doc)
+        lines = toml_text.split("\n")
+        if tunnel_token:
+            meta_line = f'metadatas.token = "{tunnel_token}"'
+            insert_idx = next(
+                (
+                    i + 1
+                    for i, line in enumerate(lines)
+                    if line.startswith("serverPort")
+                ),
+                2,
+            )
+            lines.insert(insert_idx, meta_line)
+        # Restrict permissions because the file contains a bearer token.
+        fd = os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+
+    await hass.async_add_executor_job(_create_toml)
+
+    first_proxy = proxies_in[0] if proxies_in else {}
     subdomain_raw = first_proxy.get("subdomain", "")
     subdomain = subdomain_raw.split(":")[0] if ":" in subdomain_raw else subdomain_raw
     return {
@@ -142,95 +152,78 @@ async def fetch_and_update_frp_config(
     }
 
 
-async def start_frpc(hass: HomeAssistant, config_entry: ConfigEntry) -> None:
-    """Start FRPC client service."""
-    binary_path = get_frp_binary_path()
-    config_path = get_frp_config_path()
+# ── Process lifecycle ───────────────────────────────────────────────
 
-    _LOGGER.info("Config: %s and binary path: %s", config_path, binary_path)
 
+async def start_frpc(hass: HomeAssistant, config_entry: EzloConfigEntry) -> None:
+    """Start the FRPC client subprocess and a watchdog to monitor it.
+
+    On success, ``entry.runtime_data.process`` and ``.is_connected`` are
+    populated. On failure the process is None and is_connected is False.
+    """
+    binary_path = get_frp_binary_path(hass)
+    config_path = get_frp_config_path(hass)
+
+    _LOGGER.info("Starting FRPC: config=%s binary=%s", config_path, binary_path)
+
+    runtime = config_entry.runtime_data
     try:
-        process = await hass.async_add_executor_job(
-            subprocess.Popen, [str(binary_path), "-c", str(config_path)]
+        process = await asyncio.create_subprocess_exec(
+            str(binary_path),
+            "-c",
+            str(config_path),
         )
-    except (OSError, subprocess.SubprocessError) as err:
+    except (OSError, ValueError) as err:
         _LOGGER.error("Failed to start FRPC: %s", err)
-        return
+        runtime.process = None
+        runtime.is_connected = False
+        raise FrpcSetupError(str(err)) from err
 
-    # Store process reference using entry.entry_id
-    domain_data = hass.data.setdefault(DOMAIN, {})
-    domain_data[config_entry.entry_id] = {
-        "process": process,
-        "config_path": config_path,
-        "binary_path": binary_path,
-    }
+    runtime.process = process
+    runtime.config_path = config_path
+    runtime.binary_path = binary_path
+    runtime.is_connected = True
+    runtime.last_unavailable_logged = False
 
-    # Register shutdown listener only once per entry
-    listener_key = f"{config_entry.entry_id}_shutdown_unsub"
-    if listener_key not in domain_data:
-
-        async def async_shutdown(_event):
-            await async_unload_entry(hass, config_entry)
-
-        domain_data[listener_key] = hass.bus.async_listen_once(
-            "homeassistant_stop", async_shutdown
-        )
-
-
-async def stop_frpc(hass: HomeAssistant, config_entry: ConfigEntry) -> None:
-    """Stop FRPC client process."""
-
-    def _sync_stop(process: subprocess.Popen) -> None:
-        """Terminate the process synchronously."""
+    async def _watchdog() -> None:
         try:
-            if process.poll() is None:  # Process is still running
-                process.terminate()
-                try:
-                    process.wait(5)  # Wait 5 seconds for clean exit
-                except subprocess.TimeoutExpired:
-                    _LOGGER.warning("FRPC client forced shutdown")
-                    process.kill()
-                    process.wait()  # Cleanup zombies
-        except (OSError, subprocess.SubprocessError) as err:
-            _LOGGER.error("Error stopping FRPC: %s", err)
+            rc = await process.wait()
+        except asyncio.CancelledError:
+            return
+        runtime.is_connected = False
+        if not runtime.last_unavailable_logged:
+            _LOGGER.warning("FRPC exited with code %s", rc)
+            runtime.last_unavailable_logged = True
 
-    # Get stored process reference
-    if config_entry.entry_id not in hass.data.get(DOMAIN, {}):
-        _LOGGER.warning("FRPC process not found for entry %s", config_entry.entry_id)
+    runtime.watchdog_task = hass.loop.create_task(_watchdog())
+
+
+async def stop_frpc(hass: HomeAssistant, config_entry: EzloConfigEntry) -> None:
+    """Stop the FRPC client subprocess if running."""
+    runtime: EzloRuntimeData | None = getattr(config_entry, "runtime_data", None)
+    if runtime is None or runtime.process is None:
+        _LOGGER.debug("FRPC not running for entry %s", config_entry.entry_id)
         return
 
-    data = hass.data[DOMAIN].get(config_entry.entry_id)
-    if not data or "process" not in data:
-        return
-
-    process = data["process"]
+    process = runtime.process
     _LOGGER.info("Stopping FRPC client (PID: %s)", process.pid)
 
-    try:
-        await hass.async_add_executor_job(_sync_stop, process)
-    except (OSError, subprocess.SubprocessError) as err:
-        _LOGGER.error("Failed to stop FRPC: %s", err)
-    finally:
-        # Cleanup data entry
-        hass.data[DOMAIN].pop(config_entry.entry_id, None)
-        _LOGGER.debug("Cleaned up FRPC resources for entry %s", config_entry.entry_id)
+    if runtime.watchdog_task is not None:
+        runtime.watchdog_task.cancel()
+        runtime.watchdog_task = None
 
+    if process.returncode is None:
+        try:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5)
+            except TimeoutError:
+                _LOGGER.warning("FRPC client forced shutdown")
+                process.kill()
+                await process.wait()
+        except (ProcessLookupError, OSError) as err:
+            _LOGGER.error("Error stopping FRPC: %s", err)
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload frpc client."""
-    if entry.entry_id not in hass.data.get(DOMAIN, {}):
-        return True
-
-    data = hass.data[DOMAIN].pop(entry.entry_id)
-    process = data["process"]
-
-    try:
-        process.terminate()
-        await hass.async_add_executor_job(process.wait, 5)
-    except subprocess.TimeoutExpired:
-        _LOGGER.warning("FRPC client did not terminate gracefully, forcing exit")
-        process.kill()
-    except OSError as err:
-        _LOGGER.error("Error stopping FRPC client: %s", err)
-
-    return True
+    runtime.process = None
+    runtime.is_connected = False
+    _LOGGER.debug("Cleaned up FRPC resources for entry %s", config_entry.entry_id)

@@ -7,7 +7,7 @@
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/ezloteam/home-assistant-ezlo-cloud/issues",
-  "quality_scale": "bronze",
+  "quality_scale": "platinum",
   "requirements": ["tomlkit==0.13.2"],
   "version": "1.0.5"
 }

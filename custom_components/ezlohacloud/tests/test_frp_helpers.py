@@ -3,28 +3,32 @@
 from __future__ import annotations
 
 from pathlib import Path
-import subprocess
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
+from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from homeassistant.components.ezlohacloud.api import SubscriptionExpiredError
-from homeassistant.components.ezlohacloud.const import DOMAIN
-from homeassistant.components.ezlohacloud.frp_helpers import (
-    async_unload_entry,
+from custom_components.ezlohacloud.const import DOMAIN
+from custom_components.ezlohacloud.exceptions import (
+    EzloApiUnreachableError,
+    EzloSubscriptionExpiredError,
+    FrpcSetupError,
+)
+from custom_components.ezlohacloud.frp_helpers import (
     fetch_and_update_frp_config,
     start_frpc,
     stop_frpc,
 )
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from custom_components.ezlohacloud.models import EzloRuntimeData
 
 USER_UUID = "f960d12e-4ccb-4f0a-b37f-0abee2cd9717"
 API_TOKEN = "api-jwt-token"
 TUNNEL_TOKEN = "tunnel-token-12345"
 
-SERVER_CONFIG_RESPONSE = {
+SERVER_CONFIG_RESPONSE: dict[str, Any] = {
     "serverConfig": {
         "serverName": "connect-dev.harc.cloud",
         "serverAddr": "152.42.152.93",
@@ -42,35 +46,28 @@ SERVER_CONFIG_RESPONSE = {
 }
 
 
-def _make_aiohttp_session_mock(
-    *, json_data: dict | None = None, error: Exception | None = None
+def _mock_aiohttp_session(
+    *,
+    json_data: dict[str, Any] | None = None,
+    status: int = 200,
+    raise_for_status_exc: Exception | None = None,
 ) -> MagicMock:
-    """Build a mock aiohttp.ClientSession that acts as an async context manager.
-
-    Both `ClientSession()` and `session.get(...)` are async context managers.
-    Tests use this to replace `aiohttp.ClientSession` end-to-end.
-    """
+    """Build a mock aiohttp.ClientSession.get() result usable in async-with."""
     response = MagicMock()
+    response.status = status
     response.json = AsyncMock(return_value=json_data or {})
-    if error is not None:
-        response.raise_for_status = MagicMock(side_effect=error)
+    if raise_for_status_exc is not None:
+        response.raise_for_status = MagicMock(side_effect=raise_for_status_exc)
     else:
         response.raise_for_status = MagicMock()
 
-    # session.get(...) returns an async context manager yielding the response
-    get_ctx = MagicMock()
-    get_ctx.__aenter__ = AsyncMock(return_value=response)
-    get_ctx.__aexit__ = AsyncMock(return_value=False)
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=response)
+    ctx.__aexit__ = AsyncMock(return_value=False)
 
     session = MagicMock()
-    session.get = MagicMock(return_value=get_ctx)
-
-    # ClientSession() returns an async context manager yielding the session
-    session_ctx = MagicMock()
-    session_ctx.__aenter__ = AsyncMock(return_value=session)
-    session_ctx.__aexit__ = AsyncMock(return_value=False)
-
-    return MagicMock(return_value=session_ctx)
+    session.get = MagicMock(return_value=ctx)
+    return session
 
 
 # ── fetch_and_update_frp_config ─────────────────────────────────────
@@ -81,66 +78,62 @@ async def test_fetch_and_update_frp_config_writes_toml(
 ) -> None:
     """Successful fetch writes a properly-formatted frpc.toml."""
     config_path = tmp_path / "config" / "frpc.toml"
+    session = _mock_aiohttp_session(json_data=SERVER_CONFIG_RESPONSE)
 
     with (
         patch(
-            "homeassistant.components.ezlohacloud.frp_helpers.get_frp_config_path",
+            "custom_components.ezlohacloud.frp_helpers.get_frp_config_path",
             return_value=config_path,
         ),
         patch(
-            "homeassistant.components.ezlohacloud.frp_helpers.aiohttp.ClientSession",
-            _make_aiohttp_session_mock(json_data=SERVER_CONFIG_RESPONSE),
+            "custom_components.ezlohacloud.frp_helpers.async_get_clientsession",
+            return_value=session,
         ),
     ):
         result = await fetch_and_update_frp_config(hass, USER_UUID, API_TOKEN)
 
     assert config_path.is_file()
     contents = config_path.read_text()
-    # Server fields
     assert 'serverAddr = "152.42.152.93"' in contents
     assert "serverPort = 7000" in contents
-    # Tunnel token written as bare dotted key
+    # Tunnel token written as a bare dotted key, not a quoted one
     assert f'metadatas.token = "{TUNNEL_TOKEN}"' in contents
-    assert '"metadatas.token"' not in contents  # not quoted
-    # Subdomain split at colon — only the hash part
+    assert '"metadatas.token"' not in contents
+    # Subdomain split at colon — only the hash portion is preserved
     assert 'subdomain = "abc123"' in contents
     assert f"{TUNNEL_TOKEN}.connect-dev" not in contents
 
-    # Returned info
     assert result["server_name"] == "connect-dev.harc.cloud"
     assert result["subdomain"] == "abc123"
+    # 0600 perms because the file carries a bearer token
+    assert (config_path.stat().st_mode & 0o777) == 0o600
 
 
 async def test_fetch_and_update_frp_config_subscription_expired(
     hass: HomeAssistant, tmp_path: Path
 ) -> None:
-    """HTTP 402 raises SubscriptionExpiredError."""
+    """HTTP 402 raises EzloSubscriptionExpiredError."""
     config_path = tmp_path / "config" / "frpc.toml"
-    error_402 = aiohttp.ClientResponseError(
-        request_info=MagicMock(),
-        history=(),
-        status=402,
-        message="subscription_required",
-    )
+    session = _mock_aiohttp_session(status=402)
 
     with (
         patch(
-            "homeassistant.components.ezlohacloud.frp_helpers.get_frp_config_path",
+            "custom_components.ezlohacloud.frp_helpers.get_frp_config_path",
             return_value=config_path,
         ),
         patch(
-            "homeassistant.components.ezlohacloud.frp_helpers.aiohttp.ClientSession",
-            _make_aiohttp_session_mock(error=error_402),
+            "custom_components.ezlohacloud.frp_helpers.async_get_clientsession",
+            return_value=session,
         ),
-        pytest.raises(SubscriptionExpiredError),
+        pytest.raises(EzloSubscriptionExpiredError),
     ):
         await fetch_and_update_frp_config(hass, USER_UUID, API_TOKEN)
 
 
-async def test_fetch_and_update_frp_config_http_error_non_402(
+async def test_fetch_and_update_frp_config_other_http_error_unreachable(
     hass: HomeAssistant, tmp_path: Path
 ) -> None:
-    """Non-402 HTTP errors re-raise the original ClientResponseError."""
+    """Non-402 HTTP errors raise EzloApiUnreachableError."""
     config_path = tmp_path / "config" / "frpc.toml"
     error_401 = aiohttp.ClientResponseError(
         request_info=MagicMock(),
@@ -148,69 +141,20 @@ async def test_fetch_and_update_frp_config_http_error_non_402(
         status=401,
         message="unauthorized",
     )
+    session = _mock_aiohttp_session(raise_for_status_exc=error_401)
 
     with (
         patch(
-            "homeassistant.components.ezlohacloud.frp_helpers.get_frp_config_path",
+            "custom_components.ezlohacloud.frp_helpers.get_frp_config_path",
             return_value=config_path,
         ),
         patch(
-            "homeassistant.components.ezlohacloud.frp_helpers.aiohttp.ClientSession",
-            _make_aiohttp_session_mock(error=error_401),
+            "custom_components.ezlohacloud.frp_helpers.async_get_clientsession",
+            return_value=session,
         ),
-        pytest.raises(aiohttp.ClientResponseError),
+        pytest.raises(EzloApiUnreachableError),
     ):
         await fetch_and_update_frp_config(hass, USER_UUID, API_TOKEN)
-
-
-async def test_fetch_and_update_frp_config_missing_server_config_key(
-    hass: HomeAssistant, tmp_path: Path
-) -> None:
-    """Missing serverConfig key raises KeyError."""
-    config_path = tmp_path / "config" / "frpc.toml"
-
-    with (
-        patch(
-            "homeassistant.components.ezlohacloud.frp_helpers.get_frp_config_path",
-            return_value=config_path,
-        ),
-        patch(
-            "homeassistant.components.ezlohacloud.frp_helpers.aiohttp.ClientSession",
-            _make_aiohttp_session_mock(json_data={"unexpected": "shape"}),
-        ),
-        pytest.raises(KeyError),
-    ):
-        await fetch_and_update_frp_config(hass, USER_UUID, API_TOKEN)
-
-
-async def test_fetch_and_update_frp_config_uses_api_uri_override(
-    hass: HomeAssistant, tmp_path: Path
-) -> None:
-    """fetch_and_update_frp_config(api_uri=...) hits the override host."""
-    config_path = tmp_path / "config" / "frpc.toml"
-    dev_api = "https://api-dev.harc.cloud"
-    session_mock = _make_aiohttp_session_mock(json_data=SERVER_CONFIG_RESPONSE)
-
-    with (
-        patch(
-            "homeassistant.components.ezlohacloud.frp_helpers.get_frp_config_path",
-            return_value=config_path,
-        ),
-        patch(
-            "homeassistant.components.ezlohacloud.frp_helpers.aiohttp.ClientSession",
-            session_mock,
-        ),
-    ):
-        await fetch_and_update_frp_config(
-            hass, USER_UUID, API_TOKEN, api_uri=dev_api
-        )
-
-    # The mock chain: ClientSession() -> __aenter__ -> session
-    # session.get(url, ...) is the call we want to inspect.
-    session_ctx = session_mock.return_value
-    session = session_ctx.__aenter__.return_value
-    called_url = session.get.call_args.args[0]
-    assert called_url == f"{dev_api}/api/user/{USER_UUID}/server-config"
 
 
 async def test_fetch_and_update_frp_config_no_tunnel_token(
@@ -218,7 +162,7 @@ async def test_fetch_and_update_frp_config_no_tunnel_token(
 ) -> None:
     """When the server response omits auth.token, no metadatas line is written."""
     config_path = tmp_path / "config" / "frpc.toml"
-    no_auth_response = {
+    no_auth_response: dict[str, Any] = {
         "serverConfig": {
             "serverName": "x.example.com",
             "serverAddr": "1.2.3.4",
@@ -234,15 +178,16 @@ async def test_fetch_and_update_frp_config_no_tunnel_token(
             ],
         }
     }
+    session = _mock_aiohttp_session(json_data=no_auth_response)
 
     with (
         patch(
-            "homeassistant.components.ezlohacloud.frp_helpers.get_frp_config_path",
+            "custom_components.ezlohacloud.frp_helpers.get_frp_config_path",
             return_value=config_path,
         ),
         patch(
-            "homeassistant.components.ezlohacloud.frp_helpers.aiohttp.ClientSession",
-            _make_aiohttp_session_mock(json_data=no_auth_response),
+            "custom_components.ezlohacloud.frp_helpers.async_get_clientsession",
+            return_value=session,
         ),
     ):
         await fetch_and_update_frp_config(hass, USER_UUID, API_TOKEN)
@@ -252,140 +197,144 @@ async def test_fetch_and_update_frp_config_no_tunnel_token(
     assert 'subdomain = "abc"' in contents
 
 
-# ── start_frpc ──────────────────────────────────────────────────────
+async def test_fetch_and_update_frp_config_uses_api_uri_override(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    """fetch_and_update_frp_config(api_uri=...) hits the override host."""
+    config_path = tmp_path / "config" / "frpc.toml"
+    dev_api = "https://api-dev.harc.cloud"
+    session = _mock_aiohttp_session(json_data=SERVER_CONFIG_RESPONSE)
+
+    with (
+        patch(
+            "custom_components.ezlohacloud.frp_helpers.get_frp_config_path",
+            return_value=config_path,
+        ),
+        patch(
+            "custom_components.ezlohacloud.frp_helpers.async_get_clientsession",
+            return_value=session,
+        ),
+    ):
+        await fetch_and_update_frp_config(
+            hass, USER_UUID, API_TOKEN, api_uri=dev_api
+        )
+
+    called_url = session.get.call_args.args[0]
+    assert called_url == f"{dev_api}/api/user/{USER_UUID}/server-config"
 
 
-async def test_start_frpc_success(hass: HomeAssistant) -> None:
-    """start_frpc stores the spawned process under DOMAIN/entry_id."""
-    entry = MagicMock(spec=ConfigEntry)
-    entry.entry_id = "entry-xyz"
+# ── start_frpc / stop_frpc ──────────────────────────────────────────
+
+
+async def test_start_frpc_records_process_and_marks_connected(
+    hass: HomeAssistant,
+) -> None:
+    """start_frpc stashes the process on runtime_data and marks connected."""
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data={})
+    entry.add_to_hass(hass)
+    runtime = EzloRuntimeData()
+    entry.runtime_data = runtime
+
     process = MagicMock()
     process.pid = 1234
+    process.wait = AsyncMock(return_value=0)
 
     with patch(
-        "homeassistant.components.ezlohacloud.frp_helpers.subprocess.Popen",
-        return_value=process,
+        "custom_components.ezlohacloud.frp_helpers.asyncio.create_subprocess_exec",
+        AsyncMock(return_value=process),
     ):
         await start_frpc(hass, entry)
 
-    assert hass.data[DOMAIN][entry.entry_id]["process"] is process
-    # A shutdown listener was registered (we don't trigger it; just ensure key exists)
-    assert f"{entry.entry_id}_shutdown_unsub" in hass.data[DOMAIN]
+    assert runtime.process is process
+    assert runtime.is_connected is True
+    assert runtime.watchdog_task is not None
+    runtime.watchdog_task.cancel()
 
 
-async def test_start_frpc_subprocess_failure(hass: HomeAssistant) -> None:
-    """Popen failure is swallowed and no process is stored."""
-    entry = MagicMock(spec=ConfigEntry)
-    entry.entry_id = "entry-fail"
+async def test_start_frpc_spawn_failure_raises_and_resets_runtime(
+    hass: HomeAssistant,
+) -> None:
+    """An OSError from create_subprocess_exec raises FrpcSetupError."""
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data={})
+    entry.add_to_hass(hass)
+    runtime = EzloRuntimeData()
+    runtime.is_connected = True  # ensure we observe it being reset
+    entry.runtime_data = runtime
 
-    with patch(
-        "homeassistant.components.ezlohacloud.frp_helpers.subprocess.Popen",
-        side_effect=OSError("binary not found"),
+    with (
+        patch(
+            "custom_components.ezlohacloud.frp_helpers.asyncio.create_subprocess_exec",
+            AsyncMock(side_effect=OSError("binary not found")),
+        ),
+        pytest.raises(FrpcSetupError),
     ):
         await start_frpc(hass, entry)
 
-    assert hass.data.get(DOMAIN, {}).get(entry.entry_id) is None
-
-
-# ── stop_frpc ───────────────────────────────────────────────────────
+    assert runtime.process is None
+    assert runtime.is_connected is False
 
 
 async def test_stop_frpc_terminates_running_process(hass: HomeAssistant) -> None:
-    """stop_frpc calls terminate() on a running process and cleans up."""
-    entry = MagicMock(spec=ConfigEntry)
-    entry.entry_id = "entry-running"
+    """stop_frpc terminates a running process and clears runtime state."""
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data={})
+    entry.add_to_hass(hass)
+    runtime = EzloRuntimeData()
+    entry.runtime_data = runtime
+
     process = MagicMock()
-    process.poll.return_value = None  # Still running
     process.pid = 999
-    hass.data[DOMAIN] = {entry.entry_id: {"process": process}}
+    process.returncode = None  # still running
+    process.terminate = MagicMock()
+    process.wait = AsyncMock(return_value=0)
+    runtime.process = process
+    runtime.is_connected = True
 
     await stop_frpc(hass, entry)
 
     process.terminate.assert_called_once()
-    process.wait.assert_called()
-    assert entry.entry_id not in hass.data[DOMAIN]
+    assert runtime.process is None
+    assert runtime.is_connected is False
 
 
 async def test_stop_frpc_force_kills_on_timeout(hass: HomeAssistant) -> None:
-    """If wait() times out, the process is killed."""
-    entry = MagicMock(spec=ConfigEntry)
-    entry.entry_id = "entry-stuck"
-    process = MagicMock()
-    process.poll.return_value = None
-    process.pid = 999
-    # First wait() raises TimeoutExpired, second wait() (cleanup) returns
-    process.wait.side_effect = [subprocess.TimeoutExpired("frpc", 5), 0]
-    hass.data[DOMAIN] = {entry.entry_id: {"process": process}}
+    """If terminate hangs past the 5s wait_for, stop_frpc calls kill()."""
+    import asyncio
 
-    await stop_frpc(hass, entry)
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data={})
+    entry.add_to_hass(hass)
+    runtime = EzloRuntimeData()
+    entry.runtime_data = runtime
+
+    process = MagicMock()
+    process.pid = 1
+    process.returncode = None
+    process.terminate = MagicMock()
+    process.kill = MagicMock()
+    process.wait = AsyncMock(return_value=0)
+    runtime.process = process
+
+    with patch(
+        "custom_components.ezlohacloud.frp_helpers.asyncio.wait_for",
+        AsyncMock(side_effect=asyncio.TimeoutError),
+    ):
+        await stop_frpc(hass, entry)
 
     process.terminate.assert_called_once()
     process.kill.assert_called_once()
 
 
-async def test_stop_frpc_no_process(hass: HomeAssistant) -> None:
-    """Calling stop_frpc when no process is registered returns cleanly."""
-    entry = MagicMock(spec=ConfigEntry)
-    entry.entry_id = "entry-none"
-    hass.data[DOMAIN] = {}  # No process stored
-
-    # Should not raise
-    await stop_frpc(hass, entry)
-
-
-async def test_stop_frpc_data_without_process_key(hass: HomeAssistant) -> None:
-    """Entry exists but has no `process` key — stop returns cleanly."""
-    entry = MagicMock(spec=ConfigEntry)
-    entry.entry_id = "entry-broken"
-    hass.data[DOMAIN] = {entry.entry_id: {"other": "data"}}
+async def test_stop_frpc_noop_when_no_process(hass: HomeAssistant) -> None:
+    """stop_frpc with no process attached is a no-op (no exception)."""
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data={})
+    entry.add_to_hass(hass)
+    runtime = EzloRuntimeData()
+    entry.runtime_data = runtime
 
     await stop_frpc(hass, entry)
-    # Should not error, data may or may not be cleared
-    # (current implementation early-returns without cleanup in this branch)
+    assert runtime.process is None
 
 
-# ── async_unload_entry ──────────────────────────────────────────────
-
-
-async def test_async_unload_entry_terminates_process(hass: HomeAssistant) -> None:
-    """Unloading the entry terminates the frpc process and clears state."""
-    entry = MagicMock(spec=ConfigEntry)
-    entry.entry_id = "entry-unload"
-    process = MagicMock()
-    process.pid = 555
-    hass.data[DOMAIN] = {entry.entry_id: {"process": process}}
-
-    assert await async_unload_entry(hass, entry) is True
-
-    process.terminate.assert_called_once()
-    process.wait.assert_called()
-    assert entry.entry_id not in hass.data[DOMAIN]
-
-
-async def test_async_unload_entry_no_data(hass: HomeAssistant) -> None:
-    """Unloading without stored data returns True without error."""
-    entry = MagicMock(spec=ConfigEntry)
-    entry.entry_id = "entry-empty"
-    hass.data[DOMAIN] = {}
-
-    assert await async_unload_entry(hass, entry) is True
-
-
-async def test_async_unload_entry_force_kill_on_timeout(hass: HomeAssistant) -> None:
-    """If process doesn't exit on wait, it is force-killed."""
-    entry = MagicMock(spec=ConfigEntry)
-    entry.entry_id = "entry-stuck-unload"
-    process = MagicMock()
-    process.wait.side_effect = subprocess.TimeoutExpired("frpc", 5)
-    hass.data[DOMAIN] = {entry.entry_id: {"process": process}}
-
-    assert await async_unload_entry(hass, entry) is True
-
-    process.terminate.assert_called_once()
-    process.kill.assert_called_once()
-
-
-# ── Regression guard ────────────────────────────────────────────────
+# ── Regression guard: legacy hostnames must not appear in shipped code ──
 
 
 def test_no_legacy_frp_endpoints_in_shipped_code() -> None:

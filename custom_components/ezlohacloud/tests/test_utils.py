@@ -1,139 +1,89 @@
-"""Tests for the trusted-proxy configuration utility."""
+"""Tests for the trusted-proxy detection helper."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from homeassistant.components.ezlohacloud.utils import (
-    _needs_trusted_proxy,
-    ensure_trusted_proxy_config,
-)
 from homeassistant.core import HomeAssistant
 
-# ── _needs_trusted_proxy (pure logic) ────────────────────────────────
+from custom_components.ezlohacloud.utils import is_trusted_proxy_configured
 
 
-def test_needs_trusted_proxy_already_configured() -> None:
-    """No change needed when both forwarded + 127.0.0.1 are already present."""
-    existing = (
+def test_is_trusted_proxy_configured_missing_file(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    """Returns False if configuration.yaml does not exist."""
+    hass.config.config_dir = str(tmp_path)
+    assert is_trusted_proxy_configured(hass) is False
+
+
+def test_is_trusted_proxy_configured_lowercase_true(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    """Returns True when forwarded:true + trusted_proxies 127.0.0.1 are present."""
+    config_file = tmp_path / "configuration.yaml"
+    config_file.write_text(
         "http:\n  use_x_forwarded_for: true\n  trusted_proxies:\n    - 127.0.0.1\n"
     )
-    assert _needs_trusted_proxy(existing) is None
+    hass.config.config_dir = str(tmp_path)
+    assert is_trusted_proxy_configured(hass) is True
 
 
-def test_needs_trusted_proxy_already_configured_capital_true() -> None:
-    """Accept `True` capitalization for use_x_forwarded_for."""
-    existing = (
+def test_is_trusted_proxy_configured_capital_true(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    """Accepts `True` capitalization for use_x_forwarded_for."""
+    config_file = tmp_path / "configuration.yaml"
+    config_file.write_text(
         "http:\n  use_x_forwarded_for: True\n  trusted_proxies:\n    - 127.0.0.1\n"
     )
-    assert _needs_trusted_proxy(existing) is None
+    hass.config.config_dir = str(tmp_path)
+    assert is_trusted_proxy_configured(hass) is True
 
 
-def test_needs_trusted_proxy_empty_config() -> None:
-    """Empty configuration.yaml gets the whole http block appended."""
-    result = _needs_trusted_proxy("")
-    assert result is not None
-    assert "http:" in result
-    assert "use_x_forwarded_for: true" in result
-    assert "trusted_proxies:" in result
-    assert "- 127.0.0.1" in result
-
-
-def test_needs_trusted_proxy_no_http_block_appends_block() -> None:
-    """When http: section doesn't exist, the block is appended at the end."""
-    existing = "default_config:\n\nlogger:\n  default: info\n"
-    result = _needs_trusted_proxy(existing)
-    assert result is not None
-    assert result.startswith(existing)
-    assert "http:\n  use_x_forwarded_for: true" in result
-
-
-def test_needs_trusted_proxy_http_exists_without_trusted_proxies() -> None:
-    """Adds use_x_forwarded_for + trusted_proxies under an existing http: block."""
-    existing = "http:\n  cors_allowed_origins:\n    - https://example.com\n"
-    result = _needs_trusted_proxy(existing)
-    assert result is not None
-    assert "use_x_forwarded_for: true" in result
-    assert "  trusted_proxies:\n" in result
-    assert "    - 127.0.0.1\n" in result
-
-
-def test_needs_trusted_proxy_trusted_proxies_missing_localhost() -> None:
-    """Appends 127.0.0.1 to an existing trusted_proxies list missing it."""
-    existing = (
-        "http:\n  use_x_forwarded_for: true\n  trusted_proxies:\n    - 192.168.1.0/24\n"
+def test_is_trusted_proxy_configured_missing_forwarded(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    """Returns False when trusted_proxies is present but x_forwarded_for isn't."""
+    config_file = tmp_path / "configuration.yaml"
+    config_file.write_text(
+        "http:\n  trusted_proxies:\n    - 127.0.0.1\n"
     )
-    result = _needs_trusted_proxy(existing)
-    assert result is not None
-    # Existing entry preserved
-    assert "- 192.168.1.0/24" in result
-    # New entry added
-    assert "- 127.0.0.1" in result
-
-
-def test_needs_trusted_proxy_ignores_commented_http() -> None:
-    """A commented http: line is not treated as the http block."""
-    existing = "# http:\n# This is a comment, not a real block\n"
-    result = _needs_trusted_proxy(existing)
-    assert result is not None
-    # Block should be appended at the end (no real http: block found)
-    assert "http:\n  use_x_forwarded_for: true" in result
-
-
-# ── ensure_trusted_proxy_config (file I/O) ──────────────────────────
-
-
-def test_ensure_trusted_proxy_config_missing_file(
-    hass: HomeAssistant, tmp_path: Path
-) -> None:
-    """Returns False without writing anything if configuration.yaml is absent."""
     hass.config.config_dir = str(tmp_path)
-
-    assert ensure_trusted_proxy_config(hass) is False
-    assert not (tmp_path / "configuration.yaml").exists()
+    assert is_trusted_proxy_configured(hass) is False
 
 
-def test_ensure_trusted_proxy_config_no_change_needed(
+def test_is_trusted_proxy_configured_missing_localhost(
     hass: HomeAssistant, tmp_path: Path
 ) -> None:
-    """Returns False and leaves the file untouched when already configured."""
+    """Returns False when trusted_proxies omits 127.0.0.1."""
     config_file = tmp_path / "configuration.yaml"
-    original = (
-        "http:\n  use_x_forwarded_for: true\n  trusted_proxies:\n    - 127.0.0.1\n"
+    config_file.write_text(
+        "http:\n  use_x_forwarded_for: true\n  trusted_proxies:\n    - 10.0.0.1\n"
     )
-    config_file.write_text(original)
     hass.config.config_dir = str(tmp_path)
-
-    assert ensure_trusted_proxy_config(hass) is False
-    assert config_file.read_text() == original
+    assert is_trusted_proxy_configured(hass) is False
 
 
-def test_ensure_trusted_proxy_config_writes_changes(
+def test_is_trusted_proxy_configured_empty_file(
     hass: HomeAssistant, tmp_path: Path
 ) -> None:
-    """Returns True and writes the updated config to disk when changes apply."""
+    """Returns False for an empty configuration.yaml."""
     config_file = tmp_path / "configuration.yaml"
-    config_file.write_text("default_config:\n")
+    config_file.write_text("")
     hass.config.config_dir = str(tmp_path)
-
-    assert ensure_trusted_proxy_config(hass) is True
-    new_content = config_file.read_text()
-    assert "default_config:" in new_content
-    assert "http:" in new_content
-    assert "- 127.0.0.1" in new_content
+    assert is_trusted_proxy_configured(hass) is False
 
 
-def test_ensure_trusted_proxy_config_is_idempotent(
+def test_is_trusted_proxy_configured_oserror_reading(
     hass: HomeAssistant, tmp_path: Path
 ) -> None:
-    """Running twice doesn't add duplicate entries."""
+    """OSError while reading configuration.yaml is treated as not-configured."""
+    from unittest.mock import patch
+
     config_file = tmp_path / "configuration.yaml"
-    config_file.write_text("default_config:\n")
+    config_file.write_text("anything")
     hass.config.config_dir = str(tmp_path)
 
-    assert ensure_trusted_proxy_config(hass) is True
-    first_content = config_file.read_text()
-
-    # Second run sees the config is already correct and does nothing
-    assert ensure_trusted_proxy_config(hass) is False
-    assert config_file.read_text() == first_content
+    with patch.object(type(config_file), "read_text", side_effect=OSError("denied")):
+        assert is_trusted_proxy_configured(hass) is False

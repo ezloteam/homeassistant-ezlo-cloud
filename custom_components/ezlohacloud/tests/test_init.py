@@ -1,212 +1,259 @@
-"""Tests for the top-level integration setup/unload + helpers in __init__.py."""
+"""Tests for top-level setup/unload in __init__.py."""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from homeassistant.components.ezlohacloud import (
+from custom_components.ezlohacloud import (
     async_setup_entry,
     async_unload_entry,
-    get_config_data,
-    get_config_entry,
-    setup_frpc_configuration,
+    get_system_architecture,
 )
-from homeassistant.components.ezlohacloud.api import SubscriptionExpiredError
-from homeassistant.components.ezlohacloud.const import DOMAIN, SUBSCRIPTION_CANCELED
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from custom_components.ezlohacloud.const import DOMAIN, SubscriptionStatus
+from custom_components.ezlohacloud.exceptions import (
+    EzloSubscriptionExpiredError,
+    FrpcInstallError,
+    FrpcUnsupportedArchitectureError,
+)
+from custom_components.ezlohacloud.models import EzloRuntimeData
 
-from tests.common import MockConfigEntry
-
-# ── get_config_entry / get_config_data ──────────────────────────────
-
-
-def test_get_config_entry_raises_when_no_entry(hass: HomeAssistant) -> None:
-    """Without any config entry, get_config_entry raises ValueError."""
-    with pytest.raises(ValueError, match="No config entry found"):
-        get_config_entry(hass)
+USER_UUID = "f960d12e-4ccb-4f0a-b37f-0abee2cd9717"
 
 
-def test_get_config_data_returns_mutable_dict(hass: HomeAssistant) -> None:
-    """get_config_data returns a regular dict (not a frozen MappingProxy)."""
-    entry = MockConfigEntry(domain=DOMAIN, data={"auth_token": "jwt"}, unique_id=DOMAIN)
-    entry.add_to_hass(hass)
-
-    data = get_config_data(hass)
-    assert data == {"auth_token": "jwt"}
-    # Verify it's mutable (not entry.data's MappingProxyType)
-    data["new_key"] = "value"
-
-
-# ── async_setup_entry ───────────────────────────────────────────────
+def _entry(**data: object) -> MockConfigEntry:
+    """Build a MockConfigEntry with the given data merged onto a sane baseline."""
+    base = {
+        "auth_token": "jwt",
+        "user": {"uuid": USER_UUID},
+    }
+    base.update(data)
+    return MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data=base)
 
 
-async def test_async_setup_entry_no_token_returns_true(
-    hass: HomeAssistant,
-) -> None:
-    """Entry without auth_token still registers (so options flow is reachable)."""
-    entry = MockConfigEntry(domain=DOMAIN, data={}, unique_id=DOMAIN)
-    entry.add_to_hass(hass)
-    assert await async_setup_entry(hass, entry) is True
-    # runtime_data was initialized to empty dict
-    assert entry.runtime_data == {}
+# ── get_system_architecture ──────────────────────────────────────────
 
 
-async def test_async_setup_entry_with_token_installs_and_configures(
-    hass: HomeAssistant,
-) -> None:
-    """A logged-in entry installs the binary and runs configuration."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        data={
-            "auth_token": "jwt",
-            "user": {"uuid": "user-uuid"},
-            "is_logged_in": True,
-        },
-        unique_id=DOMAIN,
-    )
-    entry.add_to_hass(hass)
-
-    with (
-        patch(
-            "homeassistant.components.ezlohacloud.get_system_architecture",
-            AsyncMock(return_value="amd64"),
-        ),
-        patch(
-            "homeassistant.components.ezlohacloud.install_frpc",
-            AsyncMock(return_value="/fake/bin/frpc"),
-        ),
-        patch(
-            "homeassistant.components.ezlohacloud.setup_frpc_configuration",
-            AsyncMock(return_value=True),
-        ) as setup_config,
+@pytest.mark.parametrize(
+    ("machine", "expected"),
+    [
+        ("x86_64", "amd64"),
+        ("aarch64", "arm64"),
+        ("armv7l", "arm_hf"),
+        ("armv6l", "arm"),
+        ("X86_64", "amd64"),  # case-insensitive
+    ],
+)
+async def test_get_system_architecture_known(machine: str, expected: str) -> None:
+    """Known architectures resolve to the expected mapping."""
+    with patch(
+        "custom_components.ezlohacloud.platform.machine",
+        return_value=machine,
     ):
-        assert await async_setup_entry(hass, entry) is True
-    setup_config.assert_awaited_once()
+        assert await get_system_architecture() == expected
 
 
-async def test_async_setup_entry_raises_config_entry_not_ready(
+async def test_get_system_architecture_unsupported() -> None:
+    """Unsupported architecture raises FrpcUnsupportedArchitectureError."""
+    with (
+        patch(
+            "custom_components.ezlohacloud.platform.machine",
+            return_value="riscv64",
+        ),
+        pytest.raises(FrpcUnsupportedArchitectureError),
+    ):
+        await get_system_architecture()
+
+
+# ── async_setup_entry: early-exit paths ──────────────────────────────
+
+
+async def test_setup_entry_missing_token_raises_auth_failed(
     hass: HomeAssistant,
 ) -> None:
-    """Any unexpected exception during setup becomes ConfigEntryNotReady."""
+    """An entry without an auth_token raises ConfigEntryAuthFailed (→ reauth)."""
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data={})
+    entry.add_to_hass(hass)
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await async_setup_entry(hass, entry)
+
+
+async def test_setup_entry_payment_required_raises_auth_failed(
+    hass: HomeAssistant,
+) -> None:
+    """A payment_required entry raises ConfigEntryAuthFailed so reauth fires."""
+    entry = _entry(payment_required=True)
+    entry.add_to_hass(hass)
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await async_setup_entry(hass, entry)
+
+
+async def test_setup_entry_missing_uuid_raises_auth_failed(
+    hass: HomeAssistant,
+) -> None:
+    """An entry whose user dict has no uuid raises ConfigEntryAuthFailed."""
     entry = MockConfigEntry(
-        domain=DOMAIN,
-        data={"auth_token": "jwt", "user": {"uuid": "user-uuid"}},
-        unique_id=DOMAIN,
+        domain=DOMAIN, unique_id=DOMAIN, data={"auth_token": "jwt", "user": {}}
     )
+    entry.add_to_hass(hass)
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await async_setup_entry(hass, entry)
+
+
+# ── async_setup_entry: install / fetch failures ──────────────────────
+
+
+async def test_setup_entry_unsupported_arch_raises_not_ready(
+    hass: HomeAssistant,
+) -> None:
+    """FrpcUnsupportedArchitectureError becomes ConfigEntryNotReady."""
+    entry = _entry()
     entry.add_to_hass(hass)
 
     with (
         patch(
-            "homeassistant.components.ezlohacloud.get_system_architecture",
-            AsyncMock(side_effect=RuntimeError("boom")),
+            "custom_components.ezlohacloud.get_system_architecture",
+            AsyncMock(side_effect=FrpcUnsupportedArchitectureError("riscv", ["amd64"])),
+        ),
+        patch(
+            "custom_components.ezlohacloud.is_trusted_proxy_configured",
+            return_value=True,
         ),
         pytest.raises(ConfigEntryNotReady),
     ):
         await async_setup_entry(hass, entry)
 
 
-# ── setup_frpc_configuration ────────────────────────────────────────
-
-
-async def test_setup_frpc_configuration_no_token(hass: HomeAssistant) -> None:
-    """Missing token returns False without touching FRP."""
-    entry = MockConfigEntry(domain=DOMAIN, data={}, unique_id=DOMAIN)
-    entry.add_to_hass(hass)
-
-    with patch(
-        "homeassistant.components.ezlohacloud.fetch_and_update_frp_config",
-        AsyncMock(),
-    ) as fetch:
-        assert await setup_frpc_configuration(hass, entry, "/fake/bin/frpc") is False
-    fetch.assert_not_awaited()
-
-
-async def test_setup_frpc_configuration_success(hass: HomeAssistant) -> None:
-    """Happy path runs trusted-proxy update, fetches config, and starts frpc."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        data={"auth_token": "jwt", "user": {"uuid": "user-uuid"}},
-        unique_id=DOMAIN,
-    )
-    entry.add_to_hass(hass)
-
-    with (
-        patch(
-            "homeassistant.components.ezlohacloud.ensure_trusted_proxy_config",
-            return_value=False,
-        ),
-        patch(
-            "homeassistant.components.ezlohacloud.fetch_and_update_frp_config",
-            AsyncMock(),
-        ) as fetch,
-        patch("homeassistant.components.ezlohacloud.start_frpc", AsyncMock()) as start,
-    ):
-        assert await setup_frpc_configuration(hass, entry, "/fake/bin/frpc") is True
-
-    fetch.assert_awaited_once()
-    start.assert_awaited_once()
-
-
-async def test_setup_frpc_configuration_subscription_expired(
+async def test_setup_entry_install_error_raises_not_ready(
     hass: HomeAssistant,
 ) -> None:
-    """SubscriptionExpiredError sets canceled state and returns True (don't fail)."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        data={"auth_token": "jwt", "user": {"uuid": "user-uuid"}},
-        unique_id=DOMAIN,
-    )
+    """A failed FRPC install surfaces as ConfigEntryNotReady."""
+    entry = _entry()
     entry.add_to_hass(hass)
 
     with (
         patch(
-            "homeassistant.components.ezlohacloud.ensure_trusted_proxy_config",
-            return_value=False,
+            "custom_components.ezlohacloud.get_system_architecture",
+            AsyncMock(return_value="amd64"),
         ),
         patch(
-            "homeassistant.components.ezlohacloud.fetch_and_update_frp_config",
-            AsyncMock(side_effect=SubscriptionExpiredError("expired")),
+            "custom_components.ezlohacloud.install_frpc",
+            AsyncMock(side_effect=FrpcInstallError("checksum fail")),
         ),
+        patch(
+            "custom_components.ezlohacloud.is_trusted_proxy_configured",
+            return_value=True,
+        ),
+        pytest.raises(ConfigEntryNotReady),
     ):
-        assert await setup_frpc_configuration(hass, entry, "/fake/bin/frpc") is True
+        await async_setup_entry(hass, entry)
 
-    assert entry.data["subscription_status"] == SUBSCRIPTION_CANCELED
+
+async def test_setup_entry_subscription_expired_writes_canceled_then_auth_failed(
+    hass: HomeAssistant,
+) -> None:
+    """EzloSubscriptionExpiredError marks the entry canceled + raises auth-failed."""
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.ezlohacloud.get_system_architecture",
+            AsyncMock(return_value="amd64"),
+        ),
+        patch(
+            "custom_components.ezlohacloud.install_frpc",
+            AsyncMock(return_value="/fake/bin/frpc"),
+        ),
+        patch(
+            "custom_components.ezlohacloud.fetch_and_update_frp_config",
+            AsyncMock(side_effect=EzloSubscriptionExpiredError("expired")),
+        ),
+        patch(
+            "custom_components.ezlohacloud.is_trusted_proxy_configured",
+            return_value=True,
+        ),
+        pytest.raises(ConfigEntryAuthFailed),
+    ):
+        await async_setup_entry(hass, entry)
+
+    assert entry.data["subscription_status"] == SubscriptionStatus.CANCELED.value
     assert entry.data["payment_required"] is True
 
 
-async def test_setup_frpc_configuration_oserror(hass: HomeAssistant) -> None:
-    """Generic OSError during fetch returns False."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        data={"auth_token": "jwt", "user": {"uuid": "user-uuid"}},
-        unique_id=DOMAIN,
-    )
+# ── async_setup_entry: happy path ────────────────────────────────────
+
+
+async def test_setup_entry_success(hass: HomeAssistant, tmp_path: Path) -> None:
+    """A complete happy path attaches runtime_data and starts frpc."""
+    entry = _entry()
     entry.add_to_hass(hass)
 
     with (
         patch(
-            "homeassistant.components.ezlohacloud.ensure_trusted_proxy_config",
-            return_value=False,
+            "custom_components.ezlohacloud.get_system_architecture",
+            AsyncMock(return_value="amd64"),
         ),
         patch(
-            "homeassistant.components.ezlohacloud.fetch_and_update_frp_config",
-            AsyncMock(side_effect=OSError("disk full")),
+            "custom_components.ezlohacloud.install_frpc",
+            AsyncMock(return_value=str(tmp_path / "frpc")),
+        ),
+        patch(
+            "custom_components.ezlohacloud.fetch_and_update_frp_config",
+            AsyncMock(
+                return_value={
+                    "server_name": "connect.harc.cloud",
+                    "subdomain": "abc",
+                }
+            ),
+        ),
+        patch(
+            "custom_components.ezlohacloud.start_frpc", AsyncMock()
+        ) as start,
+        patch(
+            "custom_components.ezlohacloud.is_trusted_proxy_configured",
+            return_value=True,
         ),
     ):
-        assert await setup_frpc_configuration(hass, entry, "/fake/bin/frpc") is False
+        ok = await async_setup_entry(hass, entry)
+
+    assert ok is True
+    assert isinstance(entry.runtime_data, EzloRuntimeData)
+    assert entry.runtime_data.binary_path == tmp_path / "frpc"
+    start.assert_awaited_once()
+    # FRP info persisted to entry data
+    assert entry.data["server_name"] == "connect.harc.cloud"
+    assert entry.data["subdomain"] == "abc"
 
 
-# ── async_unload_entry ──────────────────────────────────────────────
+# ── async_unload_entry ───────────────────────────────────────────────
 
 
-async def test_async_unload_entry_calls_stop_frpc(hass: HomeAssistant) -> None:
-    """Unloading the entry delegates to stop_frpc."""
-    entry = MockConfigEntry(domain=DOMAIN, data={}, unique_id=DOMAIN)
+async def test_unload_entry_cancels_pending_poll_and_stops_frpc(
+    hass: HomeAssistant,
+) -> None:
+    """async_unload_entry cancels the polling task and stops frpc."""
+    entry = _entry()
     entry.add_to_hass(hass)
 
-    with patch("homeassistant.components.ezlohacloud.stop_frpc", AsyncMock()) as stop:
+    runtime = EzloRuntimeData()
+    poll_task = MagicMock()  # the unload reads `.cancel()` on it
+    runtime.payment_poll_task = poll_task
+    entry.runtime_data = runtime
+
+    with patch(
+        "custom_components.ezlohacloud.stop_frpc", AsyncMock()
+    ) as stop:
         assert await async_unload_entry(hass, entry) is True
-    stop.assert_awaited_once_with(hass, entry)
+
+    poll_task.cancel.assert_called_once()
+    assert runtime.payment_poll_task is None
+    stop.assert_awaited_once()

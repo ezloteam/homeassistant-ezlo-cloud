@@ -1,16 +1,31 @@
-"""Ezlo HA Cloud integration API for Home Assistant."""
+"""Ezlo HA Cloud integration API for Home Assistant.
+
+Each public function returns a typed dataclass on success and raises a typed
+exception on failure — no `{success, data, error}` envelopes. The HTTP
+sessions are obtained from Home Assistant via `get_async_client(hass)` so the
+integration satisfies the `inject-websession` quality-scale rule.
+"""
+
+from __future__ import annotations
 
 import base64
 import binascii
 import json
 import logging
+from dataclasses import dataclass
+from typing import Any, TypedDict
 
 import httpx
-
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.httpx_client import create_async_httpx_client
+from homeassistant.helpers.httpx_client import get_async_client
 
 from .const import DEFAULT_API_URI
+from .exceptions import (
+    EzloApiUnexpectedResponseError,
+    EzloApiUnreachableError,
+    EzloAuthError,
+    EzloMissingUUIDError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,215 +42,293 @@ def _api_url(api_uri: str) -> str:
     return f"{api_uri}/api"
 
 
-class SubscriptionExpiredError(Exception):
-    """Raised when the API returns 402 (subscription expired)."""
+# ── Typed payloads ───────────────────────────────────────────────────
 
 
-def _raise_missing_uuid():
-    raise ValueError("UUID missing in token payload")
+class UserDict(TypedDict, total=False):
+    """Authenticated-user fields returned by login/signup."""
+
+    uuid: str
+    username: str
+    email: str
+    ezlo_id: int | str
+    oem_id: int
+
+
+@dataclass(slots=True)
+class AuthResult:
+    """Result of a successful login or signup call."""
+
+    token: str
+    tunnel_token: str | None
+    user: UserDict
+    subscription_status: str | None
+    is_trial: bool
+    payment_required: bool
+    trial_ends_at: str | None
+    checkout_url: str | None
+
+
+@dataclass(slots=True)
+class StripeSession:
+    """Result of creating a Stripe Checkout session."""
+
+    checkout_url: str
+
+
+@dataclass(slots=True)
+class SubscriptionStatusResult:
+    """Result of fetching the live subscription status from the backend."""
+
+    status: str
+    is_active: bool
+    start_timestamp: str
+    end_timestamp: str
+
+
+# ── HTTP helpers ─────────────────────────────────────────────────────
+
+
+def _extract_error_message(response: httpx.Response) -> str:
+    """Pull a human-readable error message from an HTTP error response."""
+    try:
+        body = response.json()
+    except (ValueError, json.JSONDecodeError):
+        return response.text
+    if isinstance(body, dict):
+        for key in ("error", "message"):
+            value = body.get(key)
+            if isinstance(value, str):
+                return value
+    return response.text
+
+
+def _classify_status_error(error: httpx.HTTPStatusError) -> EzloAuthError | None:
+    """Return an EzloAuthError if the HTTP status indicates auth failure."""
+    if error.response.status_code in (401, 403):
+        return EzloAuthError(_extract_error_message(error.response))
+    return None
+
+
+# ── Authentication ──────────────────────────────────────────────────
 
 
 async def authenticate(
-    hass: HomeAssistant, username, password, uuid, *, api_uri: str = DEFAULT_API_URI
-):
-    """Authenticate against Ezlo API (async)."""
+    hass: HomeAssistant,
+    username: str,
+    password: str,
+    ha_instance_id: str,
+    *,
+    api_uri: str = DEFAULT_API_URI,
+) -> AuthResult:
+    """Authenticate against the Ezlo Cloud auth API.
+
+    Raises:
+        EzloAuthError: credentials rejected or backend returned 4xx auth error.
+        EzloApiUnreachableError: network failure.
+        EzloApiUnexpectedResponseError: malformed response from the API.
+        EzloMissingUUIDError: token returned but UUID claim missing.
+    """
     payload = {
         "username": username,
         "password": password,
         "oem_id": "1",
-        "ha_instance_id": uuid,
+        "ha_instance_id": ha_instance_id,
     }
 
-    client = create_async_httpx_client(hass)
+    client = get_async_client(hass)
     try:
         response = await client.post(
             f"{_auth_api_url(api_uri)}/login", json=payload, timeout=10
         )
         response.raise_for_status()
+    except httpx.HTTPStatusError as err:
+        auth_err = _classify_status_error(err)
+        if auth_err is not None:
+            raise auth_err from err
+        raise EzloApiUnexpectedResponseError(_extract_error_message(err.response)) from err
+    except httpx.HTTPError as err:
+        raise EzloApiUnreachableError(str(err)) from err
+
+    try:
         data = response.json()
-        _LOGGER.info("Login response: %s", data)
+    except (ValueError, json.JSONDecodeError) as err:
+        raise EzloApiUnexpectedResponseError(str(err)) from err
 
-        token = data.get("token")
-        if token:
-            payload = decode_jwt_payload(token)
+    _LOGGER.debug("Login response keys: %s", sorted(data) if isinstance(data, dict) else type(data).__name__)
 
-            user_uuid = payload.get("uuid")
-            ezlo_id = payload.get("ezlo_user_id")
-            email = payload.get("email", "")
-            username = payload.get("username", username)
+    token = data.get("token") if isinstance(data, dict) else None
+    if not token:
+        message = data.get("error") if isinstance(data, dict) else None
+        raise EzloAuthError(message or "Invalid credentials")
 
-            if not user_uuid:
-                _raise_missing_uuid()
+    try:
+        jwt_payload = decode_jwt_payload(token)
+    except (ValueError, binascii.Error, json.JSONDecodeError) as err:
+        raise EzloApiUnexpectedResponseError(f"Invalid JWT: {err}") from err
 
-            return {
-                "success": True,
-                "data": {
-                    "token": token,
-                    "tunnel_token": data.get("tunnel_token"),
-                    "user": {
-                        "uuid": user_uuid,
-                        "username": username,
-                        "email": email,
-                        "ezlo_id": ezlo_id,
-                        "oem_id": 1,
-                    },
-                    "subscription_status": data.get("subscription_status"),
-                    "is_trial": data.get("is_trial", False),
-                    "payment_required": data.get("payment_required", False),
-                    "trial_ends_at": data.get("trial_ends_at"),
-                    "checkout_url": data.get("checkout_url"),
-                },
-                "error": None,
-            }
-        _LOGGER.warning("Login failed: %s", data)
-        return {"success": False, "data": None, "error": "Invalid credentials"}  # noqa: TRY300
+    user_uuid = jwt_payload.get("uuid")
+    if not user_uuid:
+        raise EzloMissingUUIDError("UUID missing in token payload")
 
-    except httpx.HTTPStatusError as e:
-        try:
-            error_data = e.response.json()
-            error_msg = error_data.get("error", e.response.text)
-        except (ValueError, KeyError):
-            error_msg = e.response.text
-        _LOGGER.error(
-            "Auth request failed (HTTP %s): %s", e.response.status_code, error_msg
-        )
-        return {"success": False, "data": None, "error": error_msg}
-    except (httpx.RequestError, ValueError, binascii.Error) as e:
-        _LOGGER.error("Auth request failed: %s", e)
-        return {"success": False, "data": None, "error": "API connection failed"}
+    return AuthResult(
+        token=token,
+        tunnel_token=data.get("tunnel_token"),
+        user=UserDict(
+            uuid=user_uuid,
+            username=jwt_payload.get("username", username),
+            email=jwt_payload.get("email", ""),
+            ezlo_id=jwt_payload.get("ezlo_user_id", ""),
+            oem_id=1,
+        ),
+        subscription_status=data.get("subscription_status"),
+        is_trial=bool(data.get("is_trial", False)),
+        payment_required=bool(data.get("payment_required", False)),
+        trial_ends_at=data.get("trial_ends_at"),
+        checkout_url=data.get("checkout_url"),
+    )
 
 
 async def signup(
     hass: HomeAssistant,
-    username,
-    email,
-    password,
-    ha_instance_id,
+    username: str,
+    email: str,
+    password: str,
+    ha_instance_id: str,
     *,
     api_uri: str = DEFAULT_API_URI,
-):
-    """Send signup request to Go Auth API and return the response."""
-    _LOGGER.info("Sending signup request to Auth API")
+) -> AuthResult:
+    """Register a new account against the Ezlo Cloud auth API.
+
+    Raises:
+        EzloAuthError: backend rejected the signup (e.g. username taken).
+        EzloApiUnreachableError: network failure.
+        EzloApiUnexpectedResponseError: malformed response from the API.
+        EzloMissingUUIDError: token returned but UUID claim missing.
+    """
     payload = {
         "username": username,
         "password": password,
         "email": email,
-        # "uuid": ha_instance_id,
         "ha_instance_id": ha_instance_id,
     }
 
-    client = create_async_httpx_client(hass)
+    client = get_async_client(hass)
     try:
         response = await client.post(
-            f"{_auth_api_url(api_uri)}/signup", json=payload, timeout=5
+            f"{_auth_api_url(api_uri)}/signup", json=payload, timeout=10
         )
         response.raise_for_status()
+    except httpx.HTTPStatusError as err:
+        auth_err = _classify_status_error(err)
+        if auth_err is not None:
+            raise auth_err from err
+        raise EzloAuthError(_extract_error_message(err.response)) from err
+    except httpx.HTTPError as err:
+        raise EzloApiUnreachableError(str(err)) from err
+
+    try:
         data = response.json()
+    except (ValueError, json.JSONDecodeError) as err:
+        raise EzloApiUnexpectedResponseError(str(err)) from err
 
-        token = data.get("token")
-        if token:
-            _LOGGER.info("Signup successful")
-            return {
-                "success": True,
-                "data": {
-                    "token": token,
-                    "tunnel_token": data.get("tunnel_token"),
-                    "trial_ends_at": data.get("trial_ends_at"),
-                    "subscription_status": data.get("subscription_status", ""),
-                    "is_trial": data.get("is_trial", False),
-                    "payment_required": data.get("payment_required", True),
-                    "checkout_url": data.get("checkout_url"),
-                },
-                "error": None,
-            }
-        _LOGGER.warning("Signup failed. Response: %s", data)
-        return {
-            "success": False,
-            "data": None,
-            "error": data.get("message", "Signup failed"),
-        }
+    token = data.get("token") if isinstance(data, dict) else None
+    if not token:
+        message = data.get("message") if isinstance(data, dict) else None
+        raise EzloAuthError(message or "Signup failed")
 
-    except httpx.HTTPStatusError as e:
-        try:
-            error_data = e.response.json()
-            error_msg = error_data.get("error", e.response.text)
-        except (ValueError, KeyError):
-            error_msg = e.response.text
-        _LOGGER.error(
-            "Signup request failed (HTTP %s): %s",
-            e.response.status_code,
-            error_msg,
-        )
-        return {"success": False, "data": None, "error": error_msg}
-    except httpx.RequestError as e:
-        _LOGGER.error("Signup failed: %s", e)
-        return {"success": False, "data": None, "error": "Network error"}
+    try:
+        jwt_payload = decode_jwt_payload(token)
+    except (ValueError, binascii.Error, json.JSONDecodeError) as err:
+        raise EzloApiUnexpectedResponseError(f"Invalid JWT: {err}") from err
+
+    user_uuid = jwt_payload.get("uuid")
+    if not user_uuid:
+        raise EzloMissingUUIDError("UUID missing in token payload")
+
+    return AuthResult(
+        token=token,
+        tunnel_token=data.get("tunnel_token"),
+        user=UserDict(
+            uuid=user_uuid,
+            username=username,
+            email=email,
+            ezlo_id=jwt_payload.get("ezlo_user_id", ""),
+        ),
+        subscription_status=data.get("subscription_status", ""),
+        is_trial=bool(data.get("is_trial", False)),
+        payment_required=bool(data.get("payment_required", True)),
+        trial_ends_at=data.get("trial_ends_at"),
+        checkout_url=data.get("checkout_url"),
+    )
+
+
+# ── Stripe checkout ─────────────────────────────────────────────────
 
 
 async def create_stripe_session(
     hass: HomeAssistant,
-    user_id,
-    price_id,
-    back_ref_url,
+    user_id: str,
+    price_id: str,
+    back_ref_url: str,
     *,
     api_uri: str = DEFAULT_API_URI,
-):
-    """Create a Stripe Checkout session."""
-    _LOGGER.info("Creating Stripe checkout session for user: %s", user_id)
+) -> StripeSession:
+    """Create a Stripe Checkout session.
+
+    Raises:
+        EzloApiUnreachableError: network failure.
+        EzloApiUnexpectedResponseError: missing checkout_url in response.
+    """
     payload = {
         "user_id": user_id,
         "plan_price_id": price_id,
         "back_ref_url": back_ref_url,
     }
 
-    client = create_async_httpx_client(hass)
+    client = get_async_client(hass)
     try:
         response = await client.post(
             f"{_stripe_api_url(api_uri)}/create-session", json=payload, timeout=10
         )
         response.raise_for_status()
+    except httpx.HTTPStatusError as err:
+        raise EzloApiUnexpectedResponseError(_extract_error_message(err.response)) from err
+    except httpx.HTTPError as err:
+        raise EzloApiUnreachableError(str(err)) from err
+
+    try:
         data = response.json()
+    except (ValueError, json.JSONDecodeError) as err:
+        raise EzloApiUnexpectedResponseError(str(err)) from err
 
-        if data.get("status") is True:
-            checkout_url = data.get("data", {}).get("checkout_url")
-            if checkout_url:
-                _LOGGER.info("Stripe checkout session created")
-                return {
-                    "success": True,
-                    "data": {"checkout_url": checkout_url},
-                    "error": None,
-                }
-            _LOGGER.error("Stripe response missing checkout_url: %s", data)
-            return {"success": False, "data": None, "error": "Missing checkout URL"}
+    if not (isinstance(data, dict) and data.get("status") is True):
+        message = data.get("error", "Unknown error") if isinstance(data, dict) else "Unknown error"
+        raise EzloApiUnexpectedResponseError(message)
 
-        return {
-            "success": False,
-            "data": None,
-            "error": data.get("error", "Unknown error"),
-        }
+    checkout_url = data.get("data", {}).get("checkout_url")
+    if not isinstance(checkout_url, str) or not checkout_url:
+        raise EzloApiUnexpectedResponseError("Missing checkout URL in Stripe response")
 
-    except httpx.HTTPStatusError as e:
-        try:
-            error_data = e.response.json()
-            error_msg = error_data.get("message", e.response.text)
-        except (ValueError, KeyError):
-            error_msg = e.response.text
-        _LOGGER.error(
-            "Stripe session request failed (HTTP %s): %s",
-            e.response.status_code,
-            error_msg,
-        )
-        return {"success": False, "data": None, "error": error_msg}
-    except httpx.RequestError as e:
-        _LOGGER.error("Stripe checkout api error: %s", e)
-        return {"success": False, "data": None, "error": "Stripe checkout api error"}
+    return StripeSession(checkout_url=checkout_url)
+
+
+# ── Subscription status ─────────────────────────────────────────────
 
 
 async def get_subscription_status(
-    hass: HomeAssistant, user_uuid, *, api_uri: str = DEFAULT_API_URI
-):
-    """Fetch subscription status from Ezlo backend."""
-    client = create_async_httpx_client(hass)
+    hass: HomeAssistant,
+    user_uuid: str,
+    *,
+    api_uri: str = DEFAULT_API_URI,
+) -> SubscriptionStatusResult:
+    """Fetch the live subscription status for a user.
+
+    Raises:
+        EzloApiUnreachableError: network failure.
+        EzloApiUnexpectedResponseError: bad response shape or missing data.
+    """
+    client = get_async_client(hass)
     try:
         response = await client.get(
             f"{_api_url(api_uri)}/subscription/status",
@@ -243,65 +336,84 @@ async def get_subscription_status(
             timeout=5,
         )
         response.raise_for_status()
-        data = response.json().get("data")
+    except httpx.HTTPStatusError as err:
+        raise EzloApiUnexpectedResponseError(
+            f"http_{err.response.status_code}: {_extract_error_message(err.response)}"
+        ) from err
+    except httpx.HTTPError as err:
+        raise EzloApiUnreachableError(str(err)) from err
 
-        if data:
-            return {
-                "success": True,
-                "status": data.get("status", "unknown"),
-                "is_active": data.get("is_active", False),
-                "start_timestamp": data.get("start_timestamp", ""),
-                "end_timestamp": data.get("end_timestamp", ""),
-            }
+    try:
+        payload = response.json()
+    except (ValueError, json.JSONDecodeError) as err:
+        raise EzloApiUnexpectedResponseError(str(err)) from err
 
-        return {"success": False, "error": "No data returned"}  # noqa: TRY300
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        raise EzloApiUnexpectedResponseError("No subscription data returned")
 
-    except httpx.HTTPStatusError as e:
-        _LOGGER.warning(
-            "Subscription status returned %s — treating as still pending",
-            e.response.status_code,
-        )
-        return {"success": False, "error": f"http_{e.response.status_code}"}
-    except httpx.RequestError as e:
-        _LOGGER.error("Failed to fetch subscription status: %s", e)
-        return {"success": False, "error": "Network error"}
+    return SubscriptionStatusResult(
+        status=str(data.get("status", "unknown")),
+        is_active=bool(data.get("is_active", False)),
+        start_timestamp=str(data.get("start_timestamp", "")),
+        end_timestamp=str(data.get("end_timestamp", "")),
+    )
 
 
-_INTEGRATION_CONFIG_CACHE: dict[str, dict] = {}
+# ── Public integration config ───────────────────────────────────────
 
 
 async def get_integration_config(
-    hass: HomeAssistant, *, api_uri: str = DEFAULT_API_URI
-) -> dict | None:
-    """Fetch public integration config (Stripe price id, etc.) from the backend.
+    hass: HomeAssistant,
+    *,
+    api_uri: str = DEFAULT_API_URI,
+) -> dict[str, Any]:
+    """Fetch public integration config (Stripe price id, etc.).
 
-    Cached per-api_uri for the lifetime of the HA process — the values are
-    static per deployment and the call is cheap. Returns None on failure so
-    callers can surface a clean error.
+    The result is intentionally not cached at module scope — callers may
+    cache the result on `entry.runtime_data` if they need to.
+
+    Raises:
+        EzloApiUnreachableError: network failure.
+        EzloApiUnexpectedResponseError: missing data section.
     """
-    cached = _INTEGRATION_CONFIG_CACHE.get(api_uri)
-    if cached is not None:
-        return cached
-
-    client = create_async_httpx_client(hass)
+    client = get_async_client(hass)
     try:
         response = await client.get(
             f"{_api_url(api_uri)}/integration/config", timeout=5
         )
         response.raise_for_status()
-        data = response.json().get("data") or {}
-        _INTEGRATION_CONFIG_CACHE[api_uri] = data
-        return data  # noqa: TRY300
-    except (httpx.RequestError, httpx.HTTPStatusError) as e:
-        _LOGGER.error("Failed to fetch integration config: %s", e)
-        return None
+    except httpx.HTTPStatusError as err:
+        raise EzloApiUnexpectedResponseError(
+            f"http_{err.response.status_code}: {_extract_error_message(err.response)}"
+        ) from err
+    except httpx.HTTPError as err:
+        raise EzloApiUnreachableError(str(err)) from err
+
+    try:
+        payload = response.json()
+    except (ValueError, json.JSONDecodeError) as err:
+        raise EzloApiUnexpectedResponseError(str(err)) from err
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        raise EzloApiUnexpectedResponseError("No integration config data returned")
+    return data
 
 
-def decode_jwt_payload(token: str) -> dict:
-    """Decode a JWT token and return its payload as a dictionary."""
+# ── JWT helpers ─────────────────────────────────────────────────────
+
+
+def decode_jwt_payload(token: str) -> dict[str, Any]:
+    """Decode a JWT token and return its payload as a dictionary.
+
+    Raises:
+        ValueError: invalid JWT format.
+    """
     parts = token.split(".")
     if len(parts) != 3:
         raise ValueError("Invalid JWT format")
 
     payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
-    return json.loads(base64.urlsafe_b64decode(payload_b64))
+    decoded: dict[str, Any] = json.loads(base64.urlsafe_b64decode(payload_b64))
+    return decoded
