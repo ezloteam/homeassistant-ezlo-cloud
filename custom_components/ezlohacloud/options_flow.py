@@ -205,7 +205,7 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_advanced(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """QA-only: override the Ezlo Cloud API endpoint for this entry."""
+        """Override the Ezlo Cloud API endpoint for this entry."""
         if not self.show_advanced_options:
             return self.async_abort(reason="advanced_disabled")
 

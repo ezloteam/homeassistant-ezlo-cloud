@@ -126,7 +126,7 @@ menu — there is no YAML configuration.
 | `view_status` | (read-only) | – | – | Shows the current subscription status (live-fetched from the backend, cached for 60s). |
 | `subscribe` | (Stripe link) | – | – | Opens Stripe Checkout in your browser to start/resume the paid subscription. |
 | `logout` | – | – | – | Clears the local credentials and tears down the tunnel. |
-| `advanced` | `api_uri` | string | no | **Hidden unless `Advanced mode` is enabled in your HA profile.** Override the Ezlo Cloud API endpoint (QA/dev only). Clear the field to revert to `https://api.harc.cloud`. |
+| `advanced` | `api_uri` | string | no | **Hidden unless `Advanced mode` is enabled in your HA profile.** Override the Ezlo Cloud API endpoint. Clear the field to revert to `https://api.harc.cloud`. |
 
 A **Reconfigure** option is available in the integration menu and uses the
 same form as `login` to change credentials in place without removing the

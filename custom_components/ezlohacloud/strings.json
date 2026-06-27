@@ -73,7 +73,7 @@
       },
       "advanced": {
         "title": "Advanced — API endpoint",
-        "description": "QA-only override. Leave as the default unless you are pointing this integration at a non-production Ezlo Cloud backend.\n\nCurrent: `{current_api_uri}`\nDefault: `{default_api_uri}`\n\nClear the field to revert to the default.",
+        "description": "Override the Ezlo Cloud API endpoint.\n\nCurrent: `{current_api_uri}`\nDefault: `{default_api_uri}`\n\nClear the field to revert to the default.",
         "data": {
           "api_uri": "API endpoint URL"
         }
