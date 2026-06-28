@@ -32,12 +32,19 @@ home network to the internet.
 
 ## Installation
 
-This integration is installed through [HACS](https://hacs.xyz).
+**The easy way — just click this button:**
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ezloteam&repository=home-assistant-ezlo-cloud&category=integration)
+
+It opens Ezlo Cloud HARC straight in [HACS](https://hacs.xyz). Install it,
+restart Home Assistant, then add it under **Settings → Devices & Services →
+Add Integration → Ezlo Cloud HARC**.
+
+**…or do it the hard way:**
 
 1. Make sure [HACS](https://hacs.xyz) is installed in your Home Assistant.
-2. Use the install badge at the top of this page, or search for
-   **Ezlo Cloud HARC** inside HACS.
-3. Install the integration and restart Home Assistant.
+2. In HACS, search for **Ezlo Cloud HARC** and install it.
+3. Restart Home Assistant.
 4. Go to **Settings → Devices & Services → Add Integration** and choose
    **Ezlo Cloud HARC**.
 
