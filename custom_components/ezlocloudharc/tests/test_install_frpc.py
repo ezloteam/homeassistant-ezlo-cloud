@@ -13,12 +13,12 @@ import httpx
 import pytest
 from homeassistant.core import HomeAssistant
 
-from custom_components.ezlohacloud import (
+from custom_components.ezlocloudharc import (
     _extract_frpc_binary,
     check_binary_current,
     install_frpc,
 )
-from custom_components.ezlohacloud.exceptions import (
+from custom_components.ezlocloudharc.exceptions import (
     FrpcChecksumError,
     FrpcInstallError,
 )
@@ -173,15 +173,15 @@ async def test_install_frpc_skips_download_when_current(
     """If check_binary_current returns True, no download is attempted."""
     with (
         patch(
-            "custom_components.ezlohacloud.get_frp_binary_path",
+            "custom_components.ezlocloudharc.get_frp_binary_path",
             return_value=tmp_path / "bin" / "frpc",
         ),
         patch(
-            "custom_components.ezlohacloud.check_binary_current",
+            "custom_components.ezlocloudharc.check_binary_current",
             AsyncMock(return_value=True),
         ),
         patch(
-            "custom_components.ezlohacloud.get_async_client"
+            "custom_components.ezlocloudharc.get_async_client"
         ) as get_client,
     ):
         result = await install_frpc(hass, VERSION, MACHINE)
@@ -201,19 +201,19 @@ async def test_install_frpc_verifies_sha256(
     client = _patch_client_stream(tarball)
     with (
         patch(
-            "custom_components.ezlohacloud.get_frp_binary_path",
+            "custom_components.ezlocloudharc.get_frp_binary_path",
             return_value=binary_path,
         ),
         patch(
-            "custom_components.ezlohacloud.check_binary_current",
+            "custom_components.ezlocloudharc.check_binary_current",
             AsyncMock(return_value=False),
         ),
         patch(
-            "custom_components.ezlohacloud.FRPC_SHA256",
+            "custom_components.ezlocloudharc.FRPC_SHA256",
             {MACHINE: expected_sha},
         ),
         patch(
-            "custom_components.ezlohacloud.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.get_async_client", return_value=client
         ),
     ):
         result = await install_frpc(hass, VERSION, MACHINE)
@@ -232,19 +232,19 @@ async def test_install_frpc_sha256_mismatch_raises(
     client = _patch_client_stream(tarball)
     with (
         patch(
-            "custom_components.ezlohacloud.get_frp_binary_path",
+            "custom_components.ezlocloudharc.get_frp_binary_path",
             return_value=binary_path,
         ),
         patch(
-            "custom_components.ezlohacloud.check_binary_current",
+            "custom_components.ezlocloudharc.check_binary_current",
             AsyncMock(return_value=False),
         ),
         patch(
-            "custom_components.ezlohacloud.FRPC_SHA256",
+            "custom_components.ezlocloudharc.FRPC_SHA256",
             {MACHINE: "0" * 64},  # never matches
         ),
         patch(
-            "custom_components.ezlohacloud.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.get_async_client", return_value=client
         ),
         pytest.raises(FrpcChecksumError),
     ):
@@ -260,14 +260,14 @@ async def test_install_frpc_no_pinned_hash_raises(
     binary_path = tmp_path / "bin" / "frpc"
     with (
         patch(
-            "custom_components.ezlohacloud.get_frp_binary_path",
+            "custom_components.ezlocloudharc.get_frp_binary_path",
             return_value=binary_path,
         ),
         patch(
-            "custom_components.ezlohacloud.check_binary_current",
+            "custom_components.ezlocloudharc.check_binary_current",
             AsyncMock(return_value=False),
         ),
-        patch("custom_components.ezlohacloud.FRPC_SHA256", {}),
+        patch("custom_components.ezlocloudharc.FRPC_SHA256", {}),
         pytest.raises(FrpcChecksumError, match="No SHA-256 hash pinned"),
     ):
         await install_frpc(hass, VERSION, MACHINE)
@@ -285,19 +285,19 @@ async def test_install_frpc_http_error_raises_install_error(
 
     with (
         patch(
-            "custom_components.ezlohacloud.get_frp_binary_path",
+            "custom_components.ezlocloudharc.get_frp_binary_path",
             return_value=binary_path,
         ),
         patch(
-            "custom_components.ezlohacloud.check_binary_current",
+            "custom_components.ezlocloudharc.check_binary_current",
             AsyncMock(return_value=False),
         ),
         patch(
-            "custom_components.ezlohacloud.FRPC_SHA256",
+            "custom_components.ezlocloudharc.FRPC_SHA256",
             {MACHINE: "0" * 64},
         ),
         patch(
-            "custom_components.ezlohacloud.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.get_async_client", return_value=client
         ),
         pytest.raises(FrpcInstallError, match="Download failed"),
     ):

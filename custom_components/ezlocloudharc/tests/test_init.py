@@ -10,18 +10,18 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ezlohacloud import (
+from custom_components.ezlocloudharc import (
     async_setup_entry,
     async_unload_entry,
     get_system_architecture,
 )
-from custom_components.ezlohacloud.const import DOMAIN, SubscriptionStatus
-from custom_components.ezlohacloud.exceptions import (
+from custom_components.ezlocloudharc.const import DOMAIN, SubscriptionStatus
+from custom_components.ezlocloudharc.exceptions import (
     EzloSubscriptionExpiredError,
     FrpcInstallError,
     FrpcUnsupportedArchitectureError,
 )
-from custom_components.ezlohacloud.models import EzloRuntimeData
+from custom_components.ezlocloudharc.models import EzloRuntimeData
 
 USER_UUID = "f960d12e-4ccb-4f0a-b37f-0abee2cd9717"
 
@@ -52,7 +52,7 @@ def _entry(**data: object) -> MockConfigEntry:
 async def test_get_system_architecture_known(machine: str, expected: str) -> None:
     """Known architectures resolve to the expected mapping."""
     with patch(
-        "custom_components.ezlohacloud.platform.machine",
+        "custom_components.ezlocloudharc.platform.machine",
         return_value=machine,
     ):
         assert await get_system_architecture() == expected
@@ -62,7 +62,7 @@ async def test_get_system_architecture_unsupported() -> None:
     """Unsupported architecture raises FrpcUnsupportedArchitectureError."""
     with (
         patch(
-            "custom_components.ezlohacloud.platform.machine",
+            "custom_components.ezlocloudharc.platform.machine",
             return_value="riscv64",
         ),
         pytest.raises(FrpcUnsupportedArchitectureError),
@@ -120,11 +120,11 @@ async def test_setup_entry_unsupported_arch_raises_not_ready(
 
     with (
         patch(
-            "custom_components.ezlohacloud.get_system_architecture",
+            "custom_components.ezlocloudharc.get_system_architecture",
             AsyncMock(side_effect=FrpcUnsupportedArchitectureError("riscv", ["amd64"])),
         ),
         patch(
-            "custom_components.ezlohacloud.is_trusted_proxy_configured",
+            "custom_components.ezlocloudharc.is_trusted_proxy_configured",
             return_value=True,
         ),
         pytest.raises(ConfigEntryNotReady),
@@ -141,15 +141,15 @@ async def test_setup_entry_install_error_raises_not_ready(
 
     with (
         patch(
-            "custom_components.ezlohacloud.get_system_architecture",
+            "custom_components.ezlocloudharc.get_system_architecture",
             AsyncMock(return_value="amd64"),
         ),
         patch(
-            "custom_components.ezlohacloud.install_frpc",
+            "custom_components.ezlocloudharc.install_frpc",
             AsyncMock(side_effect=FrpcInstallError("checksum fail")),
         ),
         patch(
-            "custom_components.ezlohacloud.is_trusted_proxy_configured",
+            "custom_components.ezlocloudharc.is_trusted_proxy_configured",
             return_value=True,
         ),
         pytest.raises(ConfigEntryNotReady),
@@ -166,19 +166,19 @@ async def test_setup_entry_subscription_expired_writes_canceled_then_auth_failed
 
     with (
         patch(
-            "custom_components.ezlohacloud.get_system_architecture",
+            "custom_components.ezlocloudharc.get_system_architecture",
             AsyncMock(return_value="amd64"),
         ),
         patch(
-            "custom_components.ezlohacloud.install_frpc",
+            "custom_components.ezlocloudharc.install_frpc",
             AsyncMock(return_value="/fake/bin/frpc"),
         ),
         patch(
-            "custom_components.ezlohacloud.fetch_and_update_frp_config",
+            "custom_components.ezlocloudharc.fetch_and_update_frp_config",
             AsyncMock(side_effect=EzloSubscriptionExpiredError("expired")),
         ),
         patch(
-            "custom_components.ezlohacloud.is_trusted_proxy_configured",
+            "custom_components.ezlocloudharc.is_trusted_proxy_configured",
             return_value=True,
         ),
         pytest.raises(ConfigEntryAuthFailed),
@@ -199,15 +199,15 @@ async def test_setup_entry_success(hass: HomeAssistant, tmp_path: Path) -> None:
 
     with (
         patch(
-            "custom_components.ezlohacloud.get_system_architecture",
+            "custom_components.ezlocloudharc.get_system_architecture",
             AsyncMock(return_value="amd64"),
         ),
         patch(
-            "custom_components.ezlohacloud.install_frpc",
+            "custom_components.ezlocloudharc.install_frpc",
             AsyncMock(return_value=str(tmp_path / "frpc")),
         ),
         patch(
-            "custom_components.ezlohacloud.fetch_and_update_frp_config",
+            "custom_components.ezlocloudharc.fetch_and_update_frp_config",
             AsyncMock(
                 return_value={
                     "server_name": "connect.harc.cloud",
@@ -216,10 +216,10 @@ async def test_setup_entry_success(hass: HomeAssistant, tmp_path: Path) -> None:
             ),
         ),
         patch(
-            "custom_components.ezlohacloud.start_frpc", AsyncMock()
+            "custom_components.ezlocloudharc.start_frpc", AsyncMock()
         ) as start,
         patch(
-            "custom_components.ezlohacloud.is_trusted_proxy_configured",
+            "custom_components.ezlocloudharc.is_trusted_proxy_configured",
             return_value=True,
         ),
     ):
@@ -250,7 +250,7 @@ async def test_unload_entry_cancels_pending_poll_and_stops_frpc(
     entry.runtime_data = runtime
 
     with patch(
-        "custom_components.ezlohacloud.stop_frpc", AsyncMock()
+        "custom_components.ezlocloudharc.stop_frpc", AsyncMock()
     ) as stop:
         assert await async_unload_entry(hass, entry) is True
 

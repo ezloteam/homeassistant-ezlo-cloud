@@ -1,6 +1,6 @@
 {
-  "domain": "ezlohacloud",
-  "name": "Ezlo HA Cloud",
+  "domain": "ezlocloudharc",
+  "name": "Ezlo Cloud HARC",
   "codeowners": ["@ezloteam"],
   "config_flow": true,
   "documentation": "https://ezlo.com/page/homeassistant",

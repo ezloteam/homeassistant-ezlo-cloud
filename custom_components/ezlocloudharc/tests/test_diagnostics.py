@@ -8,12 +8,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ezlohacloud.const import DOMAIN, FRPC_VERSION
-from custom_components.ezlohacloud.diagnostics import (
+from custom_components.ezlocloudharc.const import DOMAIN, FRPC_VERSION
+from custom_components.ezlocloudharc.diagnostics import (
     _read_binary_version,
     async_get_config_entry_diagnostics,
 )
-from custom_components.ezlohacloud.models import EzloRuntimeData
+from custom_components.ezlocloudharc.models import EzloRuntimeData
 
 
 async def test_diagnostics_redacts_secrets_and_reports_runtime_state(
@@ -52,19 +52,19 @@ async def test_diagnostics_redacts_secrets_and_reports_runtime_state(
 
     with (
         patch(
-            "custom_components.ezlohacloud.diagnostics.get_frp_binary_path",
+            "custom_components.ezlocloudharc.diagnostics.get_frp_binary_path",
             return_value=fake_binary,
         ),
         patch(
-            "custom_components.ezlohacloud.diagnostics.get_frp_config_path",
+            "custom_components.ezlocloudharc.diagnostics.get_frp_config_path",
             return_value=fake_config,
         ),
         patch(
-            "custom_components.ezlohacloud.diagnostics._read_binary_version",
+            "custom_components.ezlocloudharc.diagnostics._read_binary_version",
             AsyncMock(return_value=f"frpc v{FRPC_VERSION}"),
         ),
         patch(
-            "custom_components.ezlohacloud.diagnostics.is_trusted_proxy_configured",
+            "custom_components.ezlocloudharc.diagnostics.is_trusted_proxy_configured",
             return_value=True,
         ),
     ):
@@ -128,7 +128,7 @@ async def test_read_binary_version_timeout_returns_none(tmp_path: Path) -> None:
     with (
         patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)),
         patch(
-            "custom_components.ezlohacloud.diagnostics.asyncio.wait_for",
+            "custom_components.ezlocloudharc.diagnostics.asyncio.wait_for",
             AsyncMock(side_effect=asyncio.TimeoutError),
         ),
     ):

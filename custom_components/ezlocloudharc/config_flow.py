@@ -95,7 +95,7 @@ class EzloHACloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 login_error_detail = str(err)
             else:
                 return self.async_create_entry(
-                    title="Ezlo HA Cloud",
+                    title="Ezlo Cloud HARC",
                     data=dict(build_entry_data(result)),
                 )
 
@@ -146,7 +146,7 @@ class EzloHACloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 signup_error_detail = str(err)
             else:
                 return self.async_create_entry(
-                    title="Ezlo HA Cloud",
+                    title="Ezlo Cloud HARC",
                     data=dict(build_entry_data(result)),
                 )
 

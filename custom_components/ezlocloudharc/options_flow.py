@@ -64,7 +64,7 @@ def classify_login_error(error: str | None) -> tuple[str, str]:
         return (
             "device_already_bound",
             "This Home Assistant installation is already linked to a"
-            " different Ezlo Cloud account.",
+            " different Ezlo Cloud HARC account.",
         )
 
     credential_markers = (
@@ -194,7 +194,7 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
             step_id="init",
             menu_options=self._with_advanced(
                 {
-                    "login": "Login to Ezlo Cloud",
+                    "login": "Login to Ezlo Cloud HARC",
                     "signup": "Create a New Account",
                 }
             ),
@@ -472,7 +472,7 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                 return self.async_abort(reason="config_unavailable")
 
             back_url = (
-                f"{self._get_base_url()}/config/integrations/integration/ezlohacloud"
+                f"{self._get_base_url()}/config/integrations/integration/ezlocloudharc"
             )
             try:
                 session = await create_stripe_session(

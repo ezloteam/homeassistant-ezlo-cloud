@@ -14,7 +14,7 @@ def auto_enable_custom_integrations(
     """Auto-enable Home Assistant's custom-component loader for every test.
 
     Required by pytest-homeassistant-custom-component so that
-    ``custom_components.ezlohacloud`` is discoverable by HA's config-entry
+    ``custom_components.ezlocloudharc`` is discoverable by HA's config-entry
     machinery (manifest.json, config_flow, translations, etc.).
     """
     yield

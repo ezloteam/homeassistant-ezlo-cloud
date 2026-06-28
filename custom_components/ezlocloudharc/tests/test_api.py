@@ -11,7 +11,7 @@ import httpx
 import pytest
 from homeassistant.core import HomeAssistant
 
-from custom_components.ezlohacloud.api import (
+from custom_components.ezlocloudharc.api import (
     AuthResult,
     StripeSession,
     SubscriptionStatusResult,
@@ -22,7 +22,7 @@ from custom_components.ezlohacloud.api import (
     get_subscription_status,
     signup,
 )
-from custom_components.ezlohacloud.exceptions import (
+from custom_components.ezlocloudharc.exceptions import (
     EzloApiUnexpectedResponseError,
     EzloApiUnreachableError,
     EzloAuthError,
@@ -116,7 +116,7 @@ async def test_authenticate_success(hass: HomeAssistant) -> None:
     )
     client = _patch_client(response=response)
     with patch(
-        "custom_components.ezlohacloud.api.get_async_client", return_value=client
+        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
     ):
         result = await authenticate(hass, "user", "pw", "ha-uuid")
 
@@ -138,7 +138,7 @@ async def test_authenticate_no_token_raises_auth_error(
     client = _patch_client(response=response)
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloAuthError, match="Invalid credentials"),
     ):
@@ -153,7 +153,7 @@ async def test_authenticate_4xx_raises_auth_error(hass: HomeAssistant) -> None:
     client = _patch_client(response=response)
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloAuthError, match="invalid credentials"),
     ):
@@ -168,7 +168,7 @@ async def test_authenticate_5xx_raises_unexpected_response(
     client = _patch_client(response=response)
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloApiUnexpectedResponseError),
     ):
@@ -182,7 +182,7 @@ async def test_authenticate_network_error_raises_unreachable(
     client = _patch_client(error=httpx.ConnectError("dns"))
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloApiUnreachableError),
     ):
@@ -196,7 +196,7 @@ async def test_authenticate_missing_uuid_raises(hass: HomeAssistant) -> None:
     client = _patch_client(response=response)
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloMissingUUIDError),
     ):
@@ -221,7 +221,7 @@ async def test_signup_success(hass: HomeAssistant) -> None:
     )
     client = _patch_client(response=response)
     with patch(
-        "custom_components.ezlohacloud.api.get_async_client", return_value=client
+        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
     ):
         result = await signup(hass, "u", "u@x.com", "pw", "ha-uuid")
 
@@ -237,7 +237,7 @@ async def test_signup_no_token_raises_auth_error(hass: HomeAssistant) -> None:
     client = _patch_client(response=response)
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloAuthError, match="Username already exists"),
     ):
@@ -252,7 +252,7 @@ async def test_signup_409_raises_auth_error(hass: HomeAssistant) -> None:
     client = _patch_client(response=response)
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloAuthError, match="Username taken"),
     ):
@@ -266,7 +266,7 @@ async def test_signup_network_error_raises_unreachable(
     client = _patch_client(error=httpx.ConnectError("dns"))
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloApiUnreachableError),
     ):
@@ -286,7 +286,7 @@ async def test_create_stripe_session_success(hass: HomeAssistant) -> None:
     )
     client = _patch_client(response=response)
     with patch(
-        "custom_components.ezlohacloud.api.get_async_client", return_value=client
+        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
     ):
         session = await create_stripe_session(
             hass, USER_UUID, "price_123", "https://back"
@@ -304,7 +304,7 @@ async def test_create_stripe_session_status_false_raises(
     client = _patch_client(response=response)
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloApiUnexpectedResponseError, match="Stripe down"),
     ):
@@ -319,7 +319,7 @@ async def test_create_stripe_session_missing_url_raises(
     client = _patch_client(response=response)
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloApiUnexpectedResponseError, match="Missing checkout URL"),
     ):
@@ -333,7 +333,7 @@ async def test_create_stripe_session_network_error_raises_unreachable(
     client = _patch_client(error=httpx.ConnectError("dns"))
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloApiUnreachableError),
     ):
@@ -357,7 +357,7 @@ async def test_get_subscription_status_success(hass: HomeAssistant) -> None:
     )
     client = _patch_client(response=response)
     with patch(
-        "custom_components.ezlohacloud.api.get_async_client", return_value=client
+        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
     ):
         result = await get_subscription_status(hass, USER_UUID)
 
@@ -376,7 +376,7 @@ async def test_get_subscription_status_empty_data_raises(
     client = _patch_client(response=response)
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloApiUnexpectedResponseError),
     ):
@@ -391,7 +391,7 @@ async def test_get_subscription_status_404_raises_unexpected_response(
     client = _patch_client(response=response)
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloApiUnexpectedResponseError, match="http_404"),
     ):
@@ -405,7 +405,7 @@ async def test_get_subscription_status_network_error_raises_unreachable(
     client = _patch_client(error=httpx.ConnectError("dns"))
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloApiUnreachableError),
     ):
@@ -420,7 +420,7 @@ async def test_get_integration_config_success(hass: HomeAssistant) -> None:
     response = _mock_response(json_data={"data": {"stripe_price_id": "price_123"}})
     client = _patch_client(response=response)
     with patch(
-        "custom_components.ezlohacloud.api.get_async_client", return_value=client
+        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
     ):
         result = await get_integration_config(hass)
 
@@ -434,7 +434,7 @@ async def test_get_integration_config_network_error_raises(
     client = _patch_client(error=httpx.ConnectError("dns"))
     with (
         patch(
-            "custom_components.ezlohacloud.api.get_async_client", return_value=client
+            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
         ),
         pytest.raises(EzloApiUnreachableError),
     ):
@@ -453,7 +453,7 @@ async def test_authenticate_uses_api_uri_override(hass: HomeAssistant) -> None:
     response = _mock_response(json_data={"token": token})
     client = _patch_client(response=response)
     with patch(
-        "custom_components.ezlohacloud.api.get_async_client", return_value=client
+        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
     ):
         await authenticate(hass, "u", "pw", "ha-uuid", api_uri=_DEV_API)
 
@@ -467,7 +467,7 @@ async def test_signup_uses_api_uri_override(hass: HomeAssistant) -> None:
     response = _mock_response(json_data={"token": token, "payment_required": False})
     client = _patch_client(response=response)
     with patch(
-        "custom_components.ezlohacloud.api.get_async_client", return_value=client
+        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
     ):
         await signup(hass, "u", "u@x.com", "pw", "ha-uuid", api_uri=_DEV_API)
 
@@ -483,7 +483,7 @@ async def test_create_stripe_session_uses_api_uri_override(
     )
     client = _patch_client(response=response)
     with patch(
-        "custom_components.ezlohacloud.api.get_async_client", return_value=client
+        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
     ):
         await create_stripe_session(
             hass, USER_UUID, "price", "https://back", api_uri=_DEV_API
@@ -501,7 +501,7 @@ async def test_get_subscription_status_uses_api_uri_override(
     )
     client = _patch_client(response=response)
     with patch(
-        "custom_components.ezlohacloud.api.get_async_client", return_value=client
+        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
     ):
         await get_subscription_status(hass, USER_UUID, api_uri=_DEV_API)
 
@@ -515,7 +515,7 @@ async def test_get_integration_config_uses_api_uri_override(
     response = _mock_response(json_data={"data": {"stripe_price_id": "p"}})
     client = _patch_client(response=response)
     with patch(
-        "custom_components.ezlohacloud.api.get_async_client", return_value=client
+        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
     ):
         await get_integration_config(hass, api_uri=_DEV_API)
 

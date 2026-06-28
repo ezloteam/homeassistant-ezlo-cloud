@@ -9,3 +9,5 @@ htmlcov/
 .pytest_cache/
 *.sync-conflict-*
 .DS_Store
+# local deploy config for homeassistant-local (private)
+homeassistant-env

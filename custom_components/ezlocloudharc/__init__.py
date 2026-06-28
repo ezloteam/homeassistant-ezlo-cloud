@@ -71,15 +71,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: EzloConfigEntry) -> bool
     if not token:
         # Without credentials we can still register the entry so the options
         # flow can prompt the user for login. Surface a reauth flow.
-        raise ConfigEntryAuthFailed("Ezlo Cloud credentials missing")
+        raise ConfigEntryAuthFailed("Ezlo Cloud HARC credentials missing")
 
     if config.get("payment_required"):
-        raise ConfigEntryAuthFailed("Ezlo Cloud subscription requires payment")
+        raise ConfigEntryAuthFailed("Ezlo Cloud HARC subscription requires payment")
 
     user = config.get("user") or {}
     uuid = user.get("uuid")
     if not uuid:
-        raise ConfigEntryAuthFailed("Ezlo Cloud token is missing a user identifier")
+        raise ConfigEntryAuthFailed("Ezlo Cloud HARC token is missing a user identifier")
 
     # Surface the trusted_proxies requirement as a repair issue rather than
     # mutating the user's configuration.yaml.

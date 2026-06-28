@@ -1,15 +1,15 @@
-# Ezlo HA Cloud
+# Ezlo Cloud HARC
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 
 Home Assistant custom integration that connects your Home Assistant instance to
-[Ezlo HA Cloud](https://ezlo.com/page/homeassistant), enabling secure remote
+[Ezlo Cloud Home Assistant Remote Connection (HARC)](https://ezlo.com/page/homeassistant), enabling secure remote
 access to your Home Assistant without exposing it to the public internet or
 configuring port forwarding on your router.
 
 The integration installs and manages an [FRP](https://github.com/fatedier/frp)
 client that opens an outbound tunnel to Ezlo's cloud, so you can reach your
-Home Assistant from anywhere through the Ezlo HA Cloud service.
+Home Assistant from anywhere through the Ezlo Cloud HARC service.
 
 ## Features
 
@@ -31,7 +31,7 @@ Home Assistant from anywhere through the Ezlo HA Cloud service.
 - Share access with a family member or contractor through their own Ezlo
   account.
 - Configure the Home Assistant Companion app's external URL to point at the
-  Ezlo HA Cloud URL so push notifications and remote control "just work".
+  Ezlo Cloud HARC URL so push notifications and remote control "just work".
 - Bridge automations that need to reach the Home Assistant REST API from
   another network without VPN tunnelling.
 
@@ -52,7 +52,7 @@ All interaction happens through the config and options flows.
 ## Requirements
 
 - Home Assistant `2024.10.0` or newer
-- An Ezlo HA Cloud account and an active subscription
+- An Ezlo Cloud HARC account and an active subscription
   (a trial is available — see [www.ezlo.com](https://ezlo.com/page/homeassistant))
 - A Home Assistant installation that can reach the public internet on outbound
   HTTPS (port 443) and the FRP control port `connect.harc.cloud:7000`
@@ -72,14 +72,14 @@ Community Store.
 1. Ensure you have [HACS](https://hacs.xyz) installed and configured in your
    Home Assistant instance.
 2. Use the button above to open the repository in HACS, or search for
-   `Ezlo HA Cloud` from inside HACS.
+   `Ezlo Cloud HARC` from inside HACS.
 3. Install the integration and restart Home Assistant.
 4. Go to **Settings → Devices & Services → Integrations** and add
-   **Ezlo HA Cloud**.
+   **Ezlo Cloud HARC**.
 
 ### Manual
 
-1. Copy the `custom_components/ezlohacloud` directory into your Home Assistant
+1. Copy the `custom_components/ezlocloudharc` directory into your Home Assistant
    `config/custom_components/` directory.
 2. Restart Home Assistant.
 
@@ -90,19 +90,19 @@ The initial config flow shows a menu and then one of two forms.
 | Step | Field | Type | Required | Description |
 |------|-------|------|----------|-------------|
 | `user` | (menu) | – | – | Choose **Log in** or **Create a new account**. |
-| `login` | `username` | string | yes | Your existing Ezlo Cloud username. |
-| `login` | `password` | string | yes | Your existing Ezlo Cloud password. |
-| `signup` | `username` | string | yes | New Ezlo Cloud username. |
+| `login` | `username` | string | yes | Your existing Ezlo Cloud HARC username. |
+| `login` | `password` | string | yes | Your existing Ezlo Cloud HARC password. |
+| `signup` | `username` | string | yes | New Ezlo Cloud HARC username. |
 | `signup` | `email` | string | yes | Contact email (used for billing and trial expiry notices). |
 | `signup` | `password` | string | yes | Password for the new account. |
 
 On success, the integration:
 
 1. Installs the FRPC binary under
-   `<config>/.storage/ezlohacloud/bin/frpc`.
+   `<config>/.storage/ezlocloudharc/bin/frpc`.
 2. Fetches the per-user tunnel config from
    `https://api.harc.cloud/api/user/<uuid>/server-config` and writes
-   `<config>/.storage/ezlohacloud/frpc.toml` (mode `0600`).
+   `<config>/.storage/ezlocloudharc/frpc.toml` (mode `0600`).
 3. Starts the FRPC client.
 4. Raises a repair issue if `configuration.yaml` doesn't yet trust the
    local reverse proxy. **You must add the block shown in the repair issue
@@ -117,16 +117,16 @@ menu — there is no YAML configuration.
 | Step | Field | Type | Required | Description |
 |------|-------|------|----------|-------------|
 | `init` | (menu) | – | – | Routes to the right sub-step based on whether you are logged in. |
-| `login` | `username` | string | yes | Switch the active Ezlo Cloud session to a different account. |
+| `login` | `username` | string | yes | Switch the active Ezlo Cloud HARC session to a different account. |
 | `login` | `password` | string | yes | Password for the account above. |
-| `signup` | `username` | string | yes | Create another Ezlo Cloud account (rare — only valid before the first successful login). |
+| `signup` | `username` | string | yes | Create another Ezlo Cloud HARC account (rare — only valid before the first successful login). |
 | `signup` | `email` | string | yes | Contact email. |
 | `signup` | `password` | string | yes | Password. |
 | `cloud_status` | (read-only) | – | – | Displays tunnel connection status, account username, and the remote URL. |
 | `view_status` | (read-only) | – | – | Shows the current subscription status (live-fetched from the backend, cached for 60s). |
 | `subscribe` | (Stripe link) | – | – | Opens Stripe Checkout in your browser to start/resume the paid subscription. |
 | `logout` | – | – | – | Clears the local credentials and tears down the tunnel. |
-| `advanced` | `api_uri` | string | no | **Hidden unless `Advanced mode` is enabled in your HA profile.** Override the Ezlo Cloud API endpoint. Clear the field to revert to `https://api.harc.cloud`. |
+| `advanced` | `api_uri` | string | no | **Hidden unless `Advanced mode` is enabled in your HA profile.** Override the Ezlo Cloud HARC API endpoint. Clear the field to revert to `https://api.harc.cloud`. |
 
 A **Reconfigure** option is available in the integration menu and uses the
 same form as `login` to change credentials in place without removing the
@@ -152,7 +152,7 @@ JSON APIs, `aiohttp` for the streaming server-config fetch).
 
 ## Subscription states
 
-The integration keeps you informed about your Ezlo HA Cloud subscription
+The integration keeps you informed about your Ezlo Cloud HARC subscription
 status. If your subscription is past due, canceled, incomplete, or a partner
 trial has expired, the integration pauses the tunnel and surfaces a prompt
 in the integration options to renew or contact your account manager. The
@@ -204,12 +204,12 @@ subdomain reported in the integration options.)
 
 ## Known limitations
 
-- Only one Ezlo HA Cloud config entry is supported per Home Assistant
+- Only one Ezlo Cloud HARC config entry is supported per Home Assistant
   instance — re-running the config flow aborts with `already_configured`.
 - The FRPC binary is downloaded from
   `github.com/fatedier/frp/releases`; the host needs outbound HTTPS to
   GitHub on first install (and on every version bump). The binary is
-  cached under `<config>/.storage/ezlohacloud/bin/frpc`.
+  cached under `<config>/.storage/ezlocloudharc/bin/frpc`.
 - Linux-only architectures: `amd64`, `arm64`, `arm` (armv6), `arm_hf`
   (armv7 hard-float).
 - After first setup, a Home Assistant restart is required for the
@@ -247,7 +247,7 @@ and restart.
 
 ### "Your session has expired"
 
-The Ezlo Cloud token has expired or been revoked. A repair / re-auth flow
+The Ezlo Cloud HARC token has expired or been revoked. A repair / re-auth flow
 is raised automatically. Re-enter your credentials.
 
 ### "Subscription expired"
@@ -258,16 +258,16 @@ flow.
 ### FRPC won't start
 
 Look in the Home Assistant logs for lines beginning with
-`custom_components.ezlohacloud`. The most common causes are:
+`custom_components.ezlocloudharc`. The most common causes are:
 
 - Architecture not in the supported list (`amd64`, `arm64`, `arm`, `arm_hf`).
-- `<config>/.storage/ezlohacloud/bin/frpc` was deleted while the
+- `<config>/.storage/ezlocloudharc/bin/frpc` was deleted while the
   integration was running — reload the integration.
 - Outbound traffic to `connect.harc.cloud:7000` is blocked by a firewall.
 
 ### Generating diagnostics
 
-From **Settings → Devices & Services → Integrations → Ezlo HA Cloud → ⋮ →
+From **Settings → Devices & Services → Integrations → Ezlo Cloud HARC → ⋮ →
 Download diagnostics** you can download a JSON file with redacted entry
 data, the installed FRPC version, process state, and connection state.
 Attach it to bug reports.
@@ -276,11 +276,11 @@ Attach it to bug reports.
 
 To remove the integration:
 
-1. **Settings → Devices & Services → Integrations → Ezlo HA Cloud → ⋮ →
+1. **Settings → Devices & Services → Integrations → Ezlo Cloud HARC → ⋮ →
    Delete**.
 2. Optionally remove the trusted-proxies block from your
    `configuration.yaml` if you added it for this integration.
-3. Optionally delete `<config>/.storage/ezlohacloud/` to remove the
+3. Optionally delete `<config>/.storage/ezlocloudharc/` to remove the
    cached FRPC binary and tunnel config.
 
 ## Support

@@ -13,9 +13,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ezlohacloud.api import AuthResult, UserDict
-from custom_components.ezlohacloud.const import DOMAIN
-from custom_components.ezlohacloud.exceptions import (
+from custom_components.ezlocloudharc.api import AuthResult, UserDict
+from custom_components.ezlocloudharc.const import DOMAIN
+from custom_components.ezlocloudharc.exceptions import (
     EzloApiUnexpectedResponseError,
     EzloApiUnreachableError,
     EzloAuthError,
@@ -90,7 +90,7 @@ async def test_login_success_creates_entry(hass: HomeAssistant) -> None:
     assert result["step_id"] == "login"
 
     with patch(
-        "custom_components.ezlohacloud.config_flow.authenticate",
+        "custom_components.ezlocloudharc.config_flow.authenticate",
         AsyncMock(return_value=_auth_result()),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -98,7 +98,7 @@ async def test_login_success_creates_entry(hass: HomeAssistant) -> None:
         )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Ezlo HA Cloud"
+    assert result["title"] == "Ezlo Cloud HARC"
     data = result["data"]
     assert data["user"]["uuid"] == USER_UUID
     assert data["user"]["username"] == "alice"
@@ -125,7 +125,7 @@ async def test_login_failure_shows_classified_error(
         result["flow_id"], {"next_step_id": "login"}
     )
     with patch(
-        "custom_components.ezlohacloud.config_flow.authenticate",
+        "custom_components.ezlocloudharc.config_flow.authenticate",
         AsyncMock(side_effect=error),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -157,7 +157,7 @@ async def test_signup_success_creates_entry_with_payment_required(
     assert result["type"] is FlowResultType.FORM
 
     with patch(
-        "custom_components.ezlohacloud.config_flow.signup",
+        "custom_components.ezlocloudharc.config_flow.signup",
         AsyncMock(return_value=_auth_result(payment_required=True)),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -181,7 +181,7 @@ async def test_signup_failure_shows_backend_error(hass: HomeAssistant) -> None:
         result["flow_id"], {"next_step_id": "signup"}
     )
     with patch(
-        "custom_components.ezlohacloud.config_flow.signup",
+        "custom_components.ezlocloudharc.config_flow.signup",
         AsyncMock(side_effect=EzloAuthError("Username taken")),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -210,7 +210,7 @@ async def test_reauth_flow_updates_entry(hass: HomeAssistant) -> None:
     assert result["step_id"] == "reauth_confirm"
 
     with patch(
-        "custom_components.ezlohacloud.config_flow.authenticate",
+        "custom_components.ezlocloudharc.config_flow.authenticate",
         AsyncMock(return_value=_auth_result()),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -235,7 +235,7 @@ async def test_login_generic_ezlo_error_shows_unknown(hass: HomeAssistant) -> No
         result["flow_id"], {"next_step_id": "login"}
     )
     with patch(
-        "custom_components.ezlohacloud.config_flow.authenticate",
+        "custom_components.ezlocloudharc.config_flow.authenticate",
         AsyncMock(side_effect=EzloApiUnexpectedResponseError("malformed")),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -256,7 +256,7 @@ async def test_signup_network_error_shows_network_error(
         result["flow_id"], {"next_step_id": "signup"}
     )
     with patch(
-        "custom_components.ezlohacloud.config_flow.signup",
+        "custom_components.ezlocloudharc.config_flow.signup",
         AsyncMock(side_effect=EzloApiUnreachableError("dns")),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -277,7 +277,7 @@ async def test_signup_generic_ezlo_error_shows_signup_failed(
         result["flow_id"], {"next_step_id": "signup"}
     )
     with patch(
-        "custom_components.ezlohacloud.config_flow.signup",
+        "custom_components.ezlocloudharc.config_flow.signup",
         AsyncMock(side_effect=EzloApiUnexpectedResponseError("oops")),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -298,7 +298,7 @@ async def test_reauth_network_error_keeps_form(hass: HomeAssistant) -> None:
 
     result = await entry.start_reauth_flow(hass)
     with patch(
-        "custom_components.ezlohacloud.config_flow.authenticate",
+        "custom_components.ezlocloudharc.config_flow.authenticate",
         AsyncMock(side_effect=EzloApiUnreachableError("dns")),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -321,7 +321,7 @@ async def test_reconfigure_network_error_keeps_form(
 
     result = await entry.start_reconfigure_flow(hass)
     with patch(
-        "custom_components.ezlohacloud.config_flow.authenticate",
+        "custom_components.ezlocloudharc.config_flow.authenticate",
         AsyncMock(side_effect=EzloApiUnreachableError("dns")),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -344,7 +344,7 @@ async def test_reconfigure_flow_updates_entry(hass: HomeAssistant) -> None:
     assert result["step_id"] == "reconfigure"
 
     with patch(
-        "custom_components.ezlohacloud.config_flow.authenticate",
+        "custom_components.ezlocloudharc.config_flow.authenticate",
         AsyncMock(return_value=_auth_result()),
     ):
         result = await hass.config_entries.flow.async_configure(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-DOMAIN = "ezlohacloud"
+DOMAIN = "ezlocloudharc"
 PLATFORMS: list[str] = []
 
 # Default Ezlo HA Cloud API endpoint. Overridable per-entry via CONF_API_URI

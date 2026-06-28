@@ -11,18 +11,18 @@ import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ezlohacloud.const import DOMAIN
-from custom_components.ezlohacloud.exceptions import (
+from custom_components.ezlocloudharc.const import DOMAIN
+from custom_components.ezlocloudharc.exceptions import (
     EzloApiUnreachableError,
     EzloSubscriptionExpiredError,
     FrpcSetupError,
 )
-from custom_components.ezlohacloud.frp_helpers import (
+from custom_components.ezlocloudharc.frp_helpers import (
     fetch_and_update_frp_config,
     start_frpc,
     stop_frpc,
 )
-from custom_components.ezlohacloud.models import EzloRuntimeData
+from custom_components.ezlocloudharc.models import EzloRuntimeData
 
 USER_UUID = "f960d12e-4ccb-4f0a-b37f-0abee2cd9717"
 API_TOKEN = "api-jwt-token"
@@ -82,11 +82,11 @@ async def test_fetch_and_update_frp_config_writes_toml(
 
     with (
         patch(
-            "custom_components.ezlohacloud.frp_helpers.get_frp_config_path",
+            "custom_components.ezlocloudharc.frp_helpers.get_frp_config_path",
             return_value=config_path,
         ),
         patch(
-            "custom_components.ezlohacloud.frp_helpers.async_get_clientsession",
+            "custom_components.ezlocloudharc.frp_helpers.async_get_clientsession",
             return_value=session,
         ),
     ):
@@ -118,11 +118,11 @@ async def test_fetch_and_update_frp_config_subscription_expired(
 
     with (
         patch(
-            "custom_components.ezlohacloud.frp_helpers.get_frp_config_path",
+            "custom_components.ezlocloudharc.frp_helpers.get_frp_config_path",
             return_value=config_path,
         ),
         patch(
-            "custom_components.ezlohacloud.frp_helpers.async_get_clientsession",
+            "custom_components.ezlocloudharc.frp_helpers.async_get_clientsession",
             return_value=session,
         ),
         pytest.raises(EzloSubscriptionExpiredError),
@@ -145,11 +145,11 @@ async def test_fetch_and_update_frp_config_other_http_error_unreachable(
 
     with (
         patch(
-            "custom_components.ezlohacloud.frp_helpers.get_frp_config_path",
+            "custom_components.ezlocloudharc.frp_helpers.get_frp_config_path",
             return_value=config_path,
         ),
         patch(
-            "custom_components.ezlohacloud.frp_helpers.async_get_clientsession",
+            "custom_components.ezlocloudharc.frp_helpers.async_get_clientsession",
             return_value=session,
         ),
         pytest.raises(EzloApiUnreachableError),
@@ -182,11 +182,11 @@ async def test_fetch_and_update_frp_config_no_tunnel_token(
 
     with (
         patch(
-            "custom_components.ezlohacloud.frp_helpers.get_frp_config_path",
+            "custom_components.ezlocloudharc.frp_helpers.get_frp_config_path",
             return_value=config_path,
         ),
         patch(
-            "custom_components.ezlohacloud.frp_helpers.async_get_clientsession",
+            "custom_components.ezlocloudharc.frp_helpers.async_get_clientsession",
             return_value=session,
         ),
     ):
@@ -207,11 +207,11 @@ async def test_fetch_and_update_frp_config_uses_api_uri_override(
 
     with (
         patch(
-            "custom_components.ezlohacloud.frp_helpers.get_frp_config_path",
+            "custom_components.ezlocloudharc.frp_helpers.get_frp_config_path",
             return_value=config_path,
         ),
         patch(
-            "custom_components.ezlohacloud.frp_helpers.async_get_clientsession",
+            "custom_components.ezlocloudharc.frp_helpers.async_get_clientsession",
             return_value=session,
         ),
     ):
@@ -240,7 +240,7 @@ async def test_start_frpc_records_process_and_marks_connected(
     process.wait = AsyncMock(return_value=0)
 
     with patch(
-        "custom_components.ezlohacloud.frp_helpers.asyncio.create_subprocess_exec",
+        "custom_components.ezlocloudharc.frp_helpers.asyncio.create_subprocess_exec",
         AsyncMock(return_value=process),
     ):
         await start_frpc(hass, entry)
@@ -263,7 +263,7 @@ async def test_start_frpc_spawn_failure_raises_and_resets_runtime(
 
     with (
         patch(
-            "custom_components.ezlohacloud.frp_helpers.asyncio.create_subprocess_exec",
+            "custom_components.ezlocloudharc.frp_helpers.asyncio.create_subprocess_exec",
             AsyncMock(side_effect=OSError("binary not found")),
         ),
         pytest.raises(FrpcSetupError),
@@ -314,7 +314,7 @@ async def test_stop_frpc_force_kills_on_timeout(hass: HomeAssistant) -> None:
     runtime.process = process
 
     with patch(
-        "custom_components.ezlohacloud.frp_helpers.asyncio.wait_for",
+        "custom_components.ezlocloudharc.frp_helpers.asyncio.wait_for",
         AsyncMock(side_effect=asyncio.TimeoutError),
     ):
         await stop_frpc(hass, entry)

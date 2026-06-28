@@ -14,24 +14,24 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.network import NoURLAvailableError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ezlohacloud.api import (
+from custom_components.ezlocloudharc.api import (
     AuthResult,
     StripeSession,
     SubscriptionStatusResult,
     UserDict,
 )
-from custom_components.ezlohacloud.const import (
+from custom_components.ezlocloudharc.const import (
     CONF_API_URI,
     DEFAULT_API_URI,
     DOMAIN,
     SubscriptionStatus,
 )
-from custom_components.ezlohacloud.exceptions import (
+from custom_components.ezlocloudharc.exceptions import (
     EzloApiUnreachableError,
     EzloAuthError,
 )
-from custom_components.ezlohacloud.models import EzloRuntimeData
-from custom_components.ezlohacloud.options_flow import (
+from custom_components.ezlocloudharc.models import EzloRuntimeData
+from custom_components.ezlocloudharc.options_flow import (
     EzloOptionsFlowHandler,
     compute_trial_days,
 )
@@ -199,11 +199,11 @@ async def test_login_invalid_credentials_shows_error(
     """A typed EzloAuthError maps to errors[base]=invalid_credentials."""
     with (
         patch(
-            "custom_components.ezlohacloud.options_flow.authenticate",
+            "custom_components.ezlocloudharc.options_flow.authenticate",
             AsyncMock(side_effect=EzloAuthError("invalid credentials")),
         ),
         patch(
-            "custom_components.ezlohacloud.options_flow.async_get_instance_id",
+            "custom_components.ezlocloudharc.options_flow.async_get_instance_id",
             AsyncMock(return_value="ha-uuid"),
         ),
     ):
@@ -218,11 +218,11 @@ async def test_login_network_error_shows_error(
     """An EzloApiUnreachableError maps to errors[base]=network_error."""
     with (
         patch(
-            "custom_components.ezlohacloud.options_flow.authenticate",
+            "custom_components.ezlocloudharc.options_flow.authenticate",
             AsyncMock(side_effect=EzloApiUnreachableError("dns")),
         ),
         patch(
-            "custom_components.ezlohacloud.options_flow.async_get_instance_id",
+            "custom_components.ezlocloudharc.options_flow.async_get_instance_id",
             AsyncMock(return_value="ha-uuid"),
         ),
     ):
@@ -238,20 +238,20 @@ async def test_login_success_aborts_login_successful(
     """Successful login starts frpc, persists tokens, aborts login_successful."""
     with (
         patch(
-            "custom_components.ezlohacloud.options_flow.authenticate",
+            "custom_components.ezlocloudharc.options_flow.authenticate",
             AsyncMock(return_value=_auth_result()),
         ),
         patch(
-            "custom_components.ezlohacloud.options_flow.fetch_and_update_frp_config",
+            "custom_components.ezlocloudharc.options_flow.fetch_and_update_frp_config",
             AsyncMock(
                 return_value={"server_name": "x.ezlo.com", "subdomain": "abc"}
             ),
         ),
         patch(
-            "custom_components.ezlohacloud.options_flow.start_frpc", AsyncMock()
+            "custom_components.ezlocloudharc.options_flow.start_frpc", AsyncMock()
         ),
         patch(
-            "custom_components.ezlohacloud.options_flow.async_get_instance_id",
+            "custom_components.ezlocloudharc.options_flow.async_get_instance_id",
             AsyncMock(return_value="ha-uuid"),
         ),
     ):
@@ -272,11 +272,11 @@ async def test_login_payment_required_routes_to_subscribe(
     """payment_required=True routes through async_step_subscribe."""
     with (
         patch(
-            "custom_components.ezlohacloud.options_flow.authenticate",
+            "custom_components.ezlocloudharc.options_flow.authenticate",
             AsyncMock(return_value=_auth_result(payment_required=True)),
         ),
         patch(
-            "custom_components.ezlohacloud.options_flow.async_get_instance_id",
+            "custom_components.ezlocloudharc.options_flow.async_get_instance_id",
             AsyncMock(return_value="ha-uuid"),
         ),
     ):
@@ -309,11 +309,11 @@ async def test_signup_failure_shows_backend_error(
     """A signup-failure exception surfaces under errors[base]=signup_failed."""
     with (
         patch(
-            "custom_components.ezlohacloud.options_flow.signup",
+            "custom_components.ezlocloudharc.options_flow.signup",
             AsyncMock(side_effect=EzloAuthError("Username taken")),
         ),
         patch(
-            "custom_components.ezlohacloud.options_flow.async_get_instance_id",
+            "custom_components.ezlocloudharc.options_flow.async_get_instance_id",
             AsyncMock(return_value="ha-uuid"),
         ),
     ):
@@ -329,11 +329,11 @@ async def test_signup_payment_required_routes_to_subscribe(
     """Successful signup with payment_required routes to subscribe."""
     with (
         patch(
-            "custom_components.ezlohacloud.options_flow.signup",
+            "custom_components.ezlocloudharc.options_flow.signup",
             AsyncMock(return_value=_auth_result(payment_required=True)),
         ),
         patch(
-            "custom_components.ezlohacloud.options_flow.async_get_instance_id",
+            "custom_components.ezlocloudharc.options_flow.async_get_instance_id",
             AsyncMock(return_value="ha-uuid"),
         ),
     ):
@@ -363,7 +363,7 @@ async def test_logout_clears_state_and_stops_frpc(
         },
     )
     with patch(
-        "custom_components.ezlohacloud.options_flow.stop_frpc", AsyncMock()
+        "custom_components.ezlocloudharc.options_flow.stop_frpc", AsyncMock()
     ) as stop:
         result = await handler.async_step_logout()
     assert result["type"] is FlowResultType.ABORT
@@ -433,7 +433,7 @@ async def test_subscribe_with_prebuilt_checkout_url(
         },
     )
     with patch(
-        "custom_components.ezlohacloud.options_flow.create_stripe_session",
+        "custom_components.ezlocloudharc.options_flow.create_stripe_session",
         AsyncMock(),
     ) as create_session:
         result = await handler.async_step_subscribe(
@@ -463,11 +463,11 @@ async def test_subscribe_fetches_checkout_url_when_none_supplied(
     )
     with (
         patch(
-            "custom_components.ezlohacloud.options_flow.get_integration_config",
+            "custom_components.ezlocloudharc.options_flow.get_integration_config",
             AsyncMock(return_value={"stripe_price_id": "price_xyz"}),
         ),
         patch(
-            "custom_components.ezlohacloud.options_flow.create_stripe_session",
+            "custom_components.ezlocloudharc.options_flow.create_stripe_session",
             AsyncMock(
                 return_value=StripeSession(checkout_url="https://fresh.example.com")
             ),
@@ -504,7 +504,7 @@ async def test_subscribe_aborts_when_config_unavailable(
         },
     )
     with patch(
-        "custom_components.ezlohacloud.options_flow.get_integration_config",
+        "custom_components.ezlocloudharc.options_flow.get_integration_config",
         AsyncMock(side_effect=EzloApiUnreachableError("dns")),
     ):
         result = await handler.async_step_subscribe()
@@ -528,11 +528,11 @@ async def test_subscribe_aborts_when_stripe_session_fails(
     )
     with (
         patch(
-            "custom_components.ezlohacloud.options_flow.get_integration_config",
+            "custom_components.ezlocloudharc.options_flow.get_integration_config",
             AsyncMock(return_value={"stripe_price_id": "price_x"}),
         ),
         patch(
-            "custom_components.ezlohacloud.options_flow.create_stripe_session",
+            "custom_components.ezlocloudharc.options_flow.create_stripe_session",
             AsyncMock(side_effect=EzloApiUnreachableError("down")),
         ),
     ):
@@ -559,7 +559,7 @@ async def test_view_status_invalid_state_shows_resubscribe(
         },
     )
     with patch(
-        "custom_components.ezlohacloud.options_flow.get_subscription_status",
+        "custom_components.ezlocloudharc.options_flow.get_subscription_status",
         AsyncMock(
             return_value=SubscriptionStatusResult(
                 status="past_due",
@@ -589,7 +589,7 @@ async def test_view_status_active_no_resubscribe(
         },
     )
     with patch(
-        "custom_components.ezlohacloud.options_flow.get_subscription_status",
+        "custom_components.ezlocloudharc.options_flow.get_subscription_status",
         AsyncMock(
             return_value=SubscriptionStatusResult(
                 status="active",
@@ -697,7 +697,7 @@ async def test_advanced_step_clearing_field_removes_override(
 def test_get_base_url_prefers_external(handler: EzloOptionsFlowHandler) -> None:
     """When an external URL is available, it is used."""
     with patch(
-        "custom_components.ezlohacloud.options_flow.get_url",
+        "custom_components.ezlocloudharc.options_flow.get_url",
         return_value="https://external.example.com",
     ):
         assert handler._get_base_url() == "https://external.example.com"
@@ -706,7 +706,7 @@ def test_get_base_url_prefers_external(handler: EzloOptionsFlowHandler) -> None:
 def test_get_base_url_final_fallback(handler: EzloOptionsFlowHandler) -> None:
     """If no URL can be resolved at all, falls back to homeassistant.local."""
     with patch(
-        "custom_components.ezlohacloud.options_flow.get_url",
+        "custom_components.ezlocloudharc.options_flow.get_url",
         side_effect=NoURLAvailableError,
     ):
         assert handler._get_base_url() == "http://homeassistant.local:8123"
@@ -717,16 +717,16 @@ def test_get_base_url_final_fallback(handler: EzloOptionsFlowHandler) -> None:
 
 def test_classify_login_error_device_already_bound() -> None:
     """Device-already-bound errors map to that specific translation key."""
-    from custom_components.ezlohacloud.options_flow import classify_login_error
+    from custom_components.ezlocloudharc.options_flow import classify_login_error
 
     key, detail = classify_login_error("device_already_bound: subdomain")
     assert key == "device_already_bound"
-    assert "different Ezlo Cloud account" in detail
+    assert "different Ezlo Cloud HARC account" in detail
 
 
 def test_classify_login_error_invalid_credentials() -> None:
     """Credential-shaped errors map to invalid_credentials."""
-    from custom_components.ezlohacloud.options_flow import classify_login_error
+    from custom_components.ezlocloudharc.options_flow import classify_login_error
 
     key, _ = classify_login_error("Invalid credentials")
     assert key == "invalid_credentials"
@@ -734,7 +734,7 @@ def test_classify_login_error_invalid_credentials() -> None:
 
 def test_classify_login_error_none_or_empty() -> None:
     """None or empty input returns the 'unknown' key with no detail."""
-    from custom_components.ezlohacloud.options_flow import classify_login_error
+    from custom_components.ezlocloudharc.options_flow import classify_login_error
 
     key, detail = classify_login_error(None)
     assert key == "unknown"

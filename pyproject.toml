@@ -1,5 +1,5 @@
 [project]
-name = "ezlohacloud"
+name = "ezlocloudharc"
 version = "1.0.5"
 description = "Home Assistant integration that connects HA to Ezlo HA Cloud."
 requires-python = ">=3.12"
@@ -31,15 +31,15 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["custom_components.ezlohacloud"]
+known-first-party = ["custom_components.ezlocloudharc"]
 
 [tool.mypy]
 python_version = "3.13"
 strict = true
 namespace_packages = true
 explicit_package_bases = true
-files = ["custom_components/ezlohacloud"]
-exclude = ["custom_components/ezlohacloud/tests/"]
+files = ["custom_components/ezlocloudharc"]
+exclude = ["custom_components/ezlocloudharc/tests/"]
 
 [[tool.mypy.overrides]]
 module = "homeassistant.*"
@@ -51,12 +51,12 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["custom_components/ezlohacloud/tests"]
+testpaths = ["custom_components/ezlocloudharc/tests"]
 pythonpath = ["."]
 
 [tool.coverage.run]
-source = ["./custom_components/ezlohacloud"]
-omit = ["custom_components/ezlohacloud/tests/*"]
+source = ["./custom_components/ezlocloudharc"]
+omit = ["custom_components/ezlocloudharc/tests/*"]
 
 [tool.coverage.report]
 fail_under = 90

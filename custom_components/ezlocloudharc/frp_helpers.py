@@ -36,7 +36,7 @@ def get_frp_config_dir(hass: HomeAssistant) -> Path:
     Uses ``hass.config.path`` so the data survives HACS upgrades and so the
     integration package directory stays read-only.
     """
-    return Path(hass.config.path(".storage", "ezlohacloud"))
+    return Path(hass.config.path(".storage", "ezlocloudharc"))
 
 
 def get_frp_config_path(hass: HomeAssistant) -> Path:

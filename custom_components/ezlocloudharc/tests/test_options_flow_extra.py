@@ -8,15 +8,15 @@ import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ezlohacloud.api import (
+from custom_components.ezlocloudharc.api import (
     AuthResult,
     SubscriptionStatusResult,
     UserDict,
 )
-from custom_components.ezlohacloud.const import DOMAIN, SubscriptionStatus
-from custom_components.ezlohacloud.exceptions import EzloApiUnreachableError
-from custom_components.ezlohacloud.models import EzloRuntimeData
-from custom_components.ezlohacloud.options_flow import (
+from custom_components.ezlocloudharc.const import DOMAIN, SubscriptionStatus
+from custom_components.ezlocloudharc.exceptions import EzloApiUnreachableError
+from custom_components.ezlocloudharc.models import EzloRuntimeData
+from custom_components.ezlocloudharc.options_flow import (
     EzloOptionsFlowHandler,
     _trial_text_for_status,
 )
@@ -146,11 +146,11 @@ async def test_handle_successful_login_frp_failure_still_logs_in(
     """If FRP config/start fails, login state is still persisted."""
     with (
         patch(
-            "custom_components.ezlohacloud.options_flow.fetch_and_update_frp_config",
+            "custom_components.ezlocloudharc.options_flow.fetch_and_update_frp_config",
             AsyncMock(side_effect=EzloApiUnreachableError("dns")),
         ),
         patch(
-            "custom_components.ezlohacloud.options_flow.start_frpc", AsyncMock()
+            "custom_components.ezlocloudharc.options_flow.start_frpc", AsyncMock()
         ),
     ):
         await handler._handle_successful_login(_auth_result())
@@ -167,13 +167,13 @@ async def test_handle_successful_login_persists_server_details(
     """Server name / subdomain from FRP config are written to the entry."""
     with (
         patch(
-            "custom_components.ezlohacloud.options_flow.fetch_and_update_frp_config",
+            "custom_components.ezlocloudharc.options_flow.fetch_and_update_frp_config",
             AsyncMock(
                 return_value={"server_name": "connect.harc.cloud", "subdomain": "h"}
             ),
         ),
         patch(
-            "custom_components.ezlohacloud.options_flow.start_frpc", AsyncMock()
+            "custom_components.ezlocloudharc.options_flow.start_frpc", AsyncMock()
         ),
     ):
         await handler._handle_successful_login(_auth_result())
@@ -200,11 +200,11 @@ async def test_poll_payment_completes_on_active(
     ]
     with (
         patch(
-            "custom_components.ezlohacloud.options_flow.asyncio.sleep",
+            "custom_components.ezlocloudharc.options_flow.asyncio.sleep",
             AsyncMock(),
         ),
         patch(
-            "custom_components.ezlohacloud.options_flow.get_subscription_status",
+            "custom_components.ezlocloudharc.options_flow.get_subscription_status",
             AsyncMock(side_effect=responses),
         ),
         patch.object(
@@ -235,11 +235,11 @@ async def test_poll_payment_times_out_without_login(
     )
     with (
         patch(
-            "custom_components.ezlohacloud.options_flow.asyncio.sleep",
+            "custom_components.ezlocloudharc.options_flow.asyncio.sleep",
             AsyncMock(),
         ),
         patch(
-            "custom_components.ezlohacloud.options_flow.get_subscription_status",
+            "custom_components.ezlocloudharc.options_flow.get_subscription_status",
             AsyncMock(return_value=not_active),
         ),
         patch.object(
@@ -247,7 +247,7 @@ async def test_poll_payment_times_out_without_login(
         ) as handle_login,
         # Shrink the loop to a single attempt
         patch(
-            "custom_components.ezlohacloud.options_flow.range",
+            "custom_components.ezlocloudharc.options_flow.range",
             return_value=range(1),
         ),
     ):

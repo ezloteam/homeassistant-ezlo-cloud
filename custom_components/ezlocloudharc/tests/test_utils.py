@@ -6,7 +6,7 @@ from pathlib import Path
 
 from homeassistant.core import HomeAssistant
 
-from custom_components.ezlohacloud.utils import is_trusted_proxy_configured
+from custom_components.ezlocloudharc.utils import is_trusted_proxy_configured
 
 
 def test_is_trusted_proxy_configured_missing_file(
