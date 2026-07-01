@@ -13,42 +13,42 @@
         "title": "Log in to Ezlo Cloud HARC",
         "description": "Enter your Ezlo Cloud HARC credentials to enable remote access.\n\n{error_detail}",
         "data": {
-          "username": "[%key:common::config_flow::data::username%]",
-          "password": "[%key:common::config_flow::data::password%]"
+          "username": "Username",
+          "password": "Password"
         }
       },
       "signup": {
         "title": "Create an Ezlo Cloud HARC Account",
         "description": "Create a new account to start a **free trial** of Ezlo Cloud HARC remote access.\n\n{error_detail}",
         "data": {
-          "username": "[%key:common::config_flow::data::username%]",
-          "email": "[%key:common::config_flow::data::email%]",
-          "password": "[%key:common::config_flow::data::password%]"
+          "username": "Username",
+          "email": "Email",
+          "password": "Password"
         }
       },
       "reauth_confirm": {
         "title": "Re-authenticate with Ezlo Cloud HARC",
         "description": "Your Ezlo Cloud HARC session has expired. Enter your credentials to restore remote access.\n\n{error_detail}",
         "data": {
-          "username": "[%key:common::config_flow::data::username%]",
-          "password": "[%key:common::config_flow::data::password%]"
+          "username": "Username",
+          "password": "Password"
         }
       },
       "reconfigure": {
         "title": "Reconfigure Ezlo Cloud HARC",
         "description": "Update the credentials used to connect to Ezlo Cloud HARC.\n\n{error_detail}",
         "data": {
-          "username": "[%key:common::config_flow::data::username%]",
-          "password": "[%key:common::config_flow::data::password%]"
+          "username": "Username",
+          "password": "Password"
         }
       }
     },
     "abort": {
-      "single_instance_allowed": "[%key:common::config_flow::abort::single_instance_allowed%]",
-      "no_devices_found": "[%key:common::config_flow::abort::no_devices_found%]",
-      "already_configured": "[%key:common::config_flow::abort::already_configured_service%]",
-      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
-      "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+      "single_instance_allowed": "Already configured. Only a single configuration possible.",
+      "no_devices_found": "No devices found on the network",
+      "already_configured": "Service is already configured",
+      "reauth_successful": "Re-authentication was successful",
+      "reconfigure_successful": "Re-configuration was successful"
     },
     "error": {
       "invalid_credentials": "Invalid username or password. Please try again.",
@@ -82,17 +82,17 @@
         "title": "Login to Ezlo Cloud HARC",
         "description": "Enter your Ezlo Cloud HARC credentials to enable remote access.\n\n{error_detail}",
         "data": {
-          "username": "[%key:common::config_flow::data::username%]",
-          "password": "[%key:common::config_flow::data::password%]"
+          "username": "Username",
+          "password": "Password"
         }
       },
       "signup": {
         "title": "Create an Ezlo Cloud HARC Account",
         "description": "Create a new account to start a **free trial** of Ezlo Cloud HARC remote access.\n\n{error_detail}",
         "data": {
-          "username": "[%key:common::config_flow::data::username%]",
-          "email": "[%key:common::config_flow::data::email%]",
-          "password": "[%key:common::config_flow::data::password%]"
+          "username": "Username",
+          "email": "Email",
+          "password": "Password"
         }
       },
       "cloud_status": {

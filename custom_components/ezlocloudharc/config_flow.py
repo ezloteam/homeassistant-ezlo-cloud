@@ -58,7 +58,7 @@ class EzloHACloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Initial step — show Log in / Create account menu."""
-        await self.async_set_unique_id(DOMAIN)
+        await self.async_set_unique_id(DOMAIN, raise_on_progress=False)
         self._abort_if_unique_id_configured()
         return self.async_show_menu(
             step_id="user",
