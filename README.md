@@ -2,7 +2,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ezloteam&repository=home-assistant-ezlo-cloud&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ezloteam&repository=homeassistant-ezlo-cloud&category=integration)
 
 **Secure remote access to your Home Assistant — from anywhere, with no port forwarding, no VPN, and no public IP.**
 
@@ -34,7 +34,7 @@ home network to the internet.
 
 **The easy way — just click this button:**
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ezloteam&repository=home-assistant-ezlo-cloud&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ezloteam&repository=homeassistant-ezlo-cloud&category=integration)
 
 It opens Ezlo Cloud HARC straight in [HACS](https://hacs.xyz). Install it,
 restart Home Assistant, then add it under **Settings → Devices & Services →
@@ -102,7 +102,7 @@ can attach to a support request.
 ## Support
 
 - Issues and feature requests:
-  <https://github.com/ezloteam/home-assistant-ezlo-cloud/issues>
+  <https://github.com/ezloteam/homeassistant-ezlo-cloud/issues>
 - Product info and plans: <https://ezlo.com/page/homeassistant>
 
 ## License
