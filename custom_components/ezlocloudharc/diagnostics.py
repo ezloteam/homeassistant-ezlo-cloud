@@ -23,8 +23,9 @@ REDACT = {
     "token",
     "uuid",
     "ezlo_id",
+    # The central subscribe URLs embed the user's email as a query param.
     "checkout_url",
-    "stripe_price_id",
+    "subscribe_url",
 }
 
 

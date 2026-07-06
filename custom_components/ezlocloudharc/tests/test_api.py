@@ -13,12 +13,9 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.ezlocloudharc.api import (
     AuthResult,
-    StripeSession,
     SubscriptionStatusResult,
     authenticate,
-    create_stripe_session,
     decode_jwt_payload,
-    get_integration_config,
     get_subscription_status,
     signup,
 )
@@ -273,73 +270,6 @@ async def test_signup_network_error_raises_unreachable(
         await signup(hass, "u", "u@x.com", "pw", "ha-uuid")
 
 
-# ── create_stripe_session ───────────────────────────────────────────
-
-
-async def test_create_stripe_session_success(hass: HomeAssistant) -> None:
-    """A success response yields a StripeSession with the checkout_url."""
-    response = _mock_response(
-        json_data={
-            "status": True,
-            "data": {"checkout_url": "https://checkout.stripe.com/xyz"},
-        }
-    )
-    client = _patch_client(response=response)
-    with patch(
-        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
-    ):
-        session = await create_stripe_session(
-            hass, USER_UUID, "price_123", "https://back"
-        )
-
-    assert isinstance(session, StripeSession)
-    assert session.checkout_url == "https://checkout.stripe.com/xyz"
-
-
-async def test_create_stripe_session_status_false_raises(
-    hass: HomeAssistant,
-) -> None:
-    """status: False raises EzloApiUnexpectedResponseError with the message."""
-    response = _mock_response(json_data={"status": False, "error": "Stripe down"})
-    client = _patch_client(response=response)
-    with (
-        patch(
-            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
-        ),
-        pytest.raises(EzloApiUnexpectedResponseError, match="Stripe down"),
-    ):
-        await create_stripe_session(hass, USER_UUID, "price_123", "https://back")
-
-
-async def test_create_stripe_session_missing_url_raises(
-    hass: HomeAssistant,
-) -> None:
-    """A success response without a checkout_url raises unexpected-response."""
-    response = _mock_response(json_data={"status": True, "data": {}})
-    client = _patch_client(response=response)
-    with (
-        patch(
-            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
-        ),
-        pytest.raises(EzloApiUnexpectedResponseError, match="Missing checkout URL"),
-    ):
-        await create_stripe_session(hass, USER_UUID, "price_123", "https://back")
-
-
-async def test_create_stripe_session_network_error_raises_unreachable(
-    hass: HomeAssistant,
-) -> None:
-    """A network error raises EzloApiUnreachableError."""
-    client = _patch_client(error=httpx.ConnectError("dns"))
-    with (
-        patch(
-            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
-        ),
-        pytest.raises(EzloApiUnreachableError),
-    ):
-        await create_stripe_session(hass, USER_UUID, "price_123", "https://back")
-
-
 # ── get_subscription_status ─────────────────────────────────────────
 
 
@@ -348,10 +278,10 @@ async def test_get_subscription_status_success(hass: HomeAssistant) -> None:
     response = _mock_response(
         json_data={
             "data": {
-                "status": "active",
+                "status": "feature_harc",
                 "is_active": True,
-                "start_timestamp": "2026-01-01",
-                "end_timestamp": "2026-12-31",
+                "is_trial": False,
+                "trial_ends_at": "",
             }
         }
     )
@@ -362,10 +292,39 @@ async def test_get_subscription_status_success(hass: HomeAssistant) -> None:
         result = await get_subscription_status(hass, USER_UUID)
 
     assert isinstance(result, SubscriptionStatusResult)
-    assert result.status == "active"
+    assert result.status == "feature_harc"
     assert result.is_active is True
-    assert result.start_timestamp == "2026-01-01"
-    assert result.end_timestamp == "2026-12-31"
+    assert result.is_trial is False
+    assert result.trial_ends_at == ""
+    assert result.subscribe_url == ""
+
+
+async def test_get_subscription_status_inactive_carries_subscribe_url(
+    hass: HomeAssistant,
+) -> None:
+    """An inactive status surfaces the central subscribe URL from the backend."""
+    url = (
+        "https://api-cloud.ezlo.com/api/v4/subscription/1/subscribe"
+        "?cadence=monthly&email=u%40x.com&plan=ezlo_harc_only"
+    )
+    response = _mock_response(
+        json_data={
+            "data": {
+                "status": "none",
+                "is_active": False,
+                "subscribe_url": url,
+            }
+        }
+    )
+    client = _patch_client(response=response)
+    with patch(
+        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
+    ):
+        result = await get_subscription_status(hass, USER_UUID)
+
+    assert result.status == "none"
+    assert result.is_active is False
+    assert result.subscribe_url == url
 
 
 async def test_get_subscription_status_empty_data_raises(
@@ -412,35 +371,6 @@ async def test_get_subscription_status_network_error_raises_unreachable(
         await get_subscription_status(hass, USER_UUID)
 
 
-# ── get_integration_config ──────────────────────────────────────────
-
-
-async def test_get_integration_config_success(hass: HomeAssistant) -> None:
-    """A success response returns the unwrapped data dict."""
-    response = _mock_response(json_data={"data": {"stripe_price_id": "price_123"}})
-    client = _patch_client(response=response)
-    with patch(
-        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
-    ):
-        result = await get_integration_config(hass)
-
-    assert result == {"stripe_price_id": "price_123"}
-
-
-async def test_get_integration_config_network_error_raises(
-    hass: HomeAssistant,
-) -> None:
-    """A network error raises EzloApiUnreachableError."""
-    client = _patch_client(error=httpx.ConnectError("dns"))
-    with (
-        patch(
-            "custom_components.ezlocloudharc.api.get_async_client", return_value=client
-        ),
-        pytest.raises(EzloApiUnreachableError),
-    ):
-        await get_integration_config(hass)
-
-
 # ── api_uri override ─────────────────────────────────────────────────
 
 
@@ -474,24 +404,6 @@ async def test_signup_uses_api_uri_override(hass: HomeAssistant) -> None:
     assert client.post.await_args.args[0] == f"{_DEV_API}/api/auth/signup"
 
 
-async def test_create_stripe_session_uses_api_uri_override(
-    hass: HomeAssistant,
-) -> None:
-    """create_stripe_session(api_uri=...) targets the override host."""
-    response = _mock_response(
-        json_data={"status": True, "data": {"checkout_url": "https://x"}}
-    )
-    client = _patch_client(response=response)
-    with patch(
-        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
-    ):
-        await create_stripe_session(
-            hass, USER_UUID, "price", "https://back", api_uri=_DEV_API
-        )
-
-    assert client.post.await_args.args[0] == f"{_DEV_API}/api/stripe/create-session"
-
-
 async def test_get_subscription_status_uses_api_uri_override(
     hass: HomeAssistant,
 ) -> None:
@@ -506,17 +418,3 @@ async def test_get_subscription_status_uses_api_uri_override(
         await get_subscription_status(hass, USER_UUID, api_uri=_DEV_API)
 
     assert client.get.await_args.args[0] == f"{_DEV_API}/api/subscription/status"
-
-
-async def test_get_integration_config_uses_api_uri_override(
-    hass: HomeAssistant,
-) -> None:
-    """get_integration_config(api_uri=...) targets the override host."""
-    response = _mock_response(json_data={"data": {"stripe_price_id": "p"}})
-    client = _patch_client(response=response)
-    with patch(
-        "custom_components.ezlocloudharc.api.get_async_client", return_value=client
-    ):
-        await get_integration_config(hass, api_uri=_DEV_API)
-
-    assert client.get.await_args.args[0] == f"{_DEV_API}/api/integration/config"

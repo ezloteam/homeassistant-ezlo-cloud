@@ -48,7 +48,6 @@ class EzloRuntimeData:
     process: asyncio.subprocess.Process | None = None
     watchdog_task: asyncio.Task[None] | None = None
     payment_poll_task: asyncio.Task[None] | None = None
-    integration_config: dict[str, str] | None = None
     subscription_cache: tuple[float, dict[str, str | bool]] | None = None
     is_connected: bool = False
     last_unavailable_logged: bool = False

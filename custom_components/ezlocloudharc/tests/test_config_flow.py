@@ -146,7 +146,7 @@ async def test_signup_success_creates_entry_with_payment_required(
     """Signup that returns payment_required still creates the entry.
 
     is_logged_in is False so the options flow's resubscribe path can
-    surface the Stripe checkout.
+    surface the central Ezlo subscribe link.
     """
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}

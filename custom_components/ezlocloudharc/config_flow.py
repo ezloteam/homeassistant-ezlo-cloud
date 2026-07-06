@@ -28,7 +28,7 @@ _LOGGER = logging.getLogger(__name__)
 def build_entry_data(result: AuthResult) -> EzloConfigData:
     """Shape an AuthResult into the dict stored on the config entry.
 
-    ``is_logged_in`` is True only when no Stripe checkout is pending — that
+    ``is_logged_in`` is True only when no subscription checkout is pending — that
     mirrors the options-flow logic and is what async_step_init in the
     options flow uses to decide between login/signup and the status menu.
     """
@@ -118,7 +118,7 @@ class EzloHACloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         When the backend says payment is required, the entry is still
         created (with `payment_required=True`) so the user can complete
-        the Stripe checkout via the options flow's resubscribe path.
+        the central Ezlo subscription via the options flow's resubscribe path.
         """
         errors: dict[str, str] = {}
         signup_error_detail = ""
