@@ -28,9 +28,12 @@ _LOGGER = logging.getLogger(__name__)
 def build_entry_data(result: AuthResult) -> EzloConfigData:
     """Shape an AuthResult into the dict stored on the config entry.
 
-    ``is_logged_in`` is True only when no subscription checkout is pending — that
-    mirrors the options-flow logic and is what async_step_init in the
-    options flow uses to decide between login/signup and the status menu.
+    ``is_logged_in`` reflects authentication only — it is True whenever we hold a
+    token, independent of subscription state. An authenticated-but-unsubscribed
+    user is logged in (credentials saved, options flow shows the subscription
+    menu); ``payment_required`` / ``subscription_status`` separately gate whether
+    the tunnel starts. Conflating the two previously made unsubscribed logins look
+    like auth failures.
     """
     return EzloConfigData(
         auth_token=result.token,
@@ -41,7 +44,7 @@ def build_entry_data(result: AuthResult) -> EzloConfigData:
             email=result.user.get("email", ""),
             ezlo_id=result.user.get("ezlo_id", ""),
         ),
-        is_logged_in=not result.payment_required,
+        is_logged_in=bool(result.token),
         subscription_status=result.subscription_status,
         trial_ends_at=result.trial_ends_at,
         payment_required=result.payment_required,

@@ -313,6 +313,9 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                             "auth_token": result.token,
                             "tunnel_token": result.tunnel_token,
                             "user": dict(result.user),
+                            # Authenticated even though unsubscribed — keep logged in
+                            # so the menu shows the subscription options, not Login.
+                            "is_logged_in": True,
                             "subscription_status": result.subscription_status,
                             "trial_ends_at": result.trial_ends_at,
                             "payment_required": True,
@@ -391,6 +394,9 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                         "auth_token": result.token,
                         "tunnel_token": result.tunnel_token,
                         "user": dict(result.user),
+                        # Authenticated even though unsubscribed — keep logged in
+                        # so the menu shows the subscription options, not Login.
+                        "is_logged_in": True,
                         "subscription_status": result.subscription_status,
                         "trial_ends_at": result.trial_ends_at,
                         "payment_required": True,

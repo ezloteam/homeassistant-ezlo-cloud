@@ -267,7 +267,11 @@ async def test_login_payment_required_routes_to_subscribe(
     configured_entry: MockConfigEntry,
     handler: EzloOptionsFlowHandler,
 ) -> None:
-    """payment_required=True routes through async_step_subscribe."""
+    """payment_required=True routes to subscribe but keeps the user logged in.
+
+    Authentication succeeded, so credentials are saved and is_logged_in=True;
+    payment_required just gates the tunnel and routes to the subscribe screen.
+    """
     with (
         patch(
             "custom_components.ezlocloudharc.options_flow.authenticate",
@@ -285,7 +289,8 @@ async def test_login_payment_required_routes_to_subscribe(
     assert (
         result["description_placeholders"]["url"] == "https://checkout.stripe.com/abc"
     )
-    assert configured_entry.data.get("is_logged_in") is not True
+    assert configured_entry.data["is_logged_in"] is True
+    assert configured_entry.data["payment_required"] is True
 
 
 # ── async_step_signup ───────────────────────────────────────────────
