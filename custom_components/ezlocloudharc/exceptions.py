@@ -37,18 +37,6 @@ class EzloSubscriptionExpiredError(EzloError):
     translation_key = "subscription_expired"
 
 
-class EzloSubscriptionInvalidError(EzloError):
-    """A non-trialing/non-active subscription state was returned."""
-
-    translation_key = "subscription_invalid"
-
-    def __init__(self, status: str) -> None:
-        super().__init__(
-            f"subscription status {status} is not valid",
-            translation_placeholders={"status": status},
-        )
-
-
 class EzloMissingUUIDError(EzloError):
     """The JWT payload did not include a user uuid."""
 

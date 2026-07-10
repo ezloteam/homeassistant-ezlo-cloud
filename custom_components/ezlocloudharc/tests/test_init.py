@@ -17,6 +17,7 @@ from custom_components.ezlocloudharc import (
 )
 from custom_components.ezlocloudharc.const import DOMAIN, SubscriptionStatus
 from custom_components.ezlocloudharc.exceptions import (
+    EzloAuthError,
     EzloSubscriptionExpiredError,
     FrpcInstallError,
     FrpcUnsupportedArchitectureError,
@@ -213,6 +214,45 @@ async def test_setup_entry_subscription_expired_writes_canceled_and_idles(
     start_frpc.assert_not_awaited()
     assert entry.data["subscription_status"] == SubscriptionStatus.CANCELED.value
     assert entry.data["payment_required"] is True
+
+
+async def test_setup_entry_auth_error_raises_auth_failed(
+    hass: HomeAssistant,
+) -> None:
+    """An expired/revoked token (EzloAuthError) triggers reauth, not a retry.
+
+    Regression guard: server-config 401/403 → EzloAuthError → ConfigEntryAuthFailed
+    so Home Assistant starts the reauth flow instead of looping on
+    ConfigEntryNotReady.
+    """
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.ezlocloudharc.get_system_architecture",
+            AsyncMock(return_value="amd64"),
+        ),
+        patch(
+            "custom_components.ezlocloudharc.install_frpc",
+            AsyncMock(return_value="/fake/bin/frpc"),
+        ),
+        patch(
+            "custom_components.ezlocloudharc.fetch_and_update_frp_config",
+            AsyncMock(side_effect=EzloAuthError("token rejected")),
+        ),
+        patch(
+            "custom_components.ezlocloudharc.is_trusted_proxy_configured",
+            return_value=True,
+        ),
+        patch(
+            "custom_components.ezlocloudharc.start_frpc", AsyncMock()
+        ) as start_frpc,
+        pytest.raises(ConfigEntryAuthFailed),
+    ):
+        await async_setup_entry(hass, entry)
+
+    start_frpc.assert_not_awaited()
 
 
 # ── async_setup_entry: happy path ────────────────────────────────────

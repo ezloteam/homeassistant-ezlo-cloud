@@ -14,6 +14,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.ezlocloudharc.const import DOMAIN
 from custom_components.ezlocloudharc.exceptions import (
     EzloApiUnreachableError,
+    EzloAuthError,
     EzloSubscriptionExpiredError,
     FrpcSetupError,
 )
@@ -133,15 +134,15 @@ async def test_fetch_and_update_frp_config_subscription_expired(
 async def test_fetch_and_update_frp_config_other_http_error_unreachable(
     hass: HomeAssistant, tmp_path: Path
 ) -> None:
-    """Non-402 HTTP errors raise EzloApiUnreachableError."""
+    """Non-auth, non-402 HTTP errors raise EzloApiUnreachableError."""
     config_path = tmp_path / "config" / "frpc.toml"
-    error_401 = aiohttp.ClientResponseError(
+    error_503 = aiohttp.ClientResponseError(
         request_info=MagicMock(),
         history=(),
-        status=401,
-        message="unauthorized",
+        status=503,
+        message="service unavailable",
     )
-    session = _mock_aiohttp_session(raise_for_status_exc=error_401)
+    session = _mock_aiohttp_session(raise_for_status_exc=error_503)
 
     with (
         patch(
@@ -153,6 +154,63 @@ async def test_fetch_and_update_frp_config_other_http_error_unreachable(
             return_value=session,
         ),
         pytest.raises(EzloApiUnreachableError),
+    ):
+        await fetch_and_update_frp_config(hass, USER_UUID, API_TOKEN)
+
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_fetch_and_update_frp_config_auth_error_from_status(
+    hass: HomeAssistant, tmp_path: Path, status: int
+) -> None:
+    """A 401/403 server-config response raises EzloAuthError (triggers reauth).
+
+    Regression guard: an expired/revoked token must surface as an auth failure
+    so async_setup_entry raises ConfigEntryAuthFailed instead of looping on
+    ConfigEntryNotReady forever.
+    """
+    config_path = tmp_path / "config" / "frpc.toml"
+    session = _mock_aiohttp_session(status=status)
+
+    with (
+        patch(
+            "custom_components.ezlocloudharc.frp_helpers.get_frp_config_path",
+            return_value=config_path,
+        ),
+        patch(
+            "custom_components.ezlocloudharc.frp_helpers.async_get_clientsession",
+            return_value=session,
+        ),
+        pytest.raises(EzloAuthError),
+    ):
+        await fetch_and_update_frp_config(hass, USER_UUID, API_TOKEN)
+
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_fetch_and_update_frp_config_auth_error_from_raise_for_status(
+    hass: HomeAssistant, tmp_path: Path, status: int
+) -> None:
+    """A 401/403 surfaced via raise_for_status() also raises EzloAuthError."""
+    config_path = tmp_path / "config" / "frpc.toml"
+    auth_err = aiohttp.ClientResponseError(
+        request_info=MagicMock(),
+        history=(),
+        status=status,
+        message="unauthorized",
+    )
+    # status kept at 200 so the explicit-status branch is skipped and the
+    # ClientResponseError handler is exercised.
+    session = _mock_aiohttp_session(raise_for_status_exc=auth_err)
+
+    with (
+        patch(
+            "custom_components.ezlocloudharc.frp_helpers.get_frp_config_path",
+            return_value=config_path,
+        ),
+        patch(
+            "custom_components.ezlocloudharc.frp_helpers.async_get_clientsession",
+            return_value=session,
+        ),
+        pytest.raises(EzloAuthError),
     ):
         await fetch_and_update_frp_config(hass, USER_UUID, API_TOKEN)
 

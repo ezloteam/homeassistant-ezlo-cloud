@@ -119,14 +119,14 @@
     }
   },
   "exceptions": {
+    "unknown": {
+      "message": "An unexpected Ezlo Cloud HARC error occurred. Please try again."
+    },
     "auth_failed": {
       "message": "Authentication with Ezlo Cloud HARC failed. Please log in again."
     },
     "subscription_expired": {
       "message": "Your Ezlo Cloud HARC subscription has expired. Please resubscribe via the integration options."
-    },
-    "subscription_invalid": {
-      "message": "Your Ezlo Cloud HARC subscription is not active (status: {status}). Please resubscribe via the integration options."
     },
     "missing_uuid": {
       "message": "The Ezlo Cloud HARC token is missing a user identifier."

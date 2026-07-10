@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
@@ -51,7 +51,6 @@ class EzloRuntimeData:
     subscription_cache: tuple[float, dict[str, str | bool]] | None = None
     is_connected: bool = False
     last_unavailable_logged: bool = False
-    unsub_callbacks: list[object] = field(default_factory=list)
 
 
 type EzloConfigEntry = ConfigEntry[EzloRuntimeData]

@@ -7,10 +7,13 @@ rules:
   appropriate-polling:
     status: exempt
     comment: |
-      This integration creates no entities. It does poll the subscription
-      endpoint while waiting for a Stripe checkout to complete and on-demand
-      when the user opens the "Subscription status" menu, but neither is
-      coordinator-managed entity polling, which is what this rule governs.
+      This integration creates no entities and runs no coordinator-managed
+      polling, which is what this rule governs. It does hit the subscription
+      endpoint in two bounded, non-entity ways: a background poll
+      (_poll_payment_and_login, every 5s for at most 15 min) that completes an
+      authenticated-but-unsubscribed login once the central subscription lands,
+      and an on-demand, 60s-cached status fetch when the subscribe screen is
+      rendered.
   brands: done
   common-modules: done
   config-flow: done

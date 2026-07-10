@@ -22,6 +22,7 @@ from .const import DEFAULT_API_URI
 from .exceptions import (
     EzloApiUnexpectedResponseError,
     EzloApiUnreachableError,
+    EzloAuthError,
     EzloSubscriptionExpiredError,
     FrpcSetupError,
 )
@@ -78,9 +79,20 @@ async def fetch_and_update_frp_config(
                 raise EzloSubscriptionExpiredError(
                     "Your subscription has expired. Please subscribe to continue."
                 )
+            # An expired/revoked token must trigger reauth, not an endless
+            # ConfigEntryNotReady retry — surface it as an auth failure so
+            # async_setup_entry raises ConfigEntryAuthFailed.
+            if response.status in (401, 403):
+                raise EzloAuthError(
+                    f"server-config rejected the token (HTTP {response.status})"
+                )
             response.raise_for_status()
             api_config = await response.json()
     except aiohttp.ClientResponseError as err:
+        if err.status in (401, 403):
+            raise EzloAuthError(
+                f"server-config rejected the token (HTTP {err.status})"
+            ) from err
         raise EzloApiUnreachableError(f"server-config HTTP {err.status}") from err
     except aiohttp.ClientError as err:
         raise EzloApiUnreachableError(str(err)) from err
