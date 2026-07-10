@@ -27,7 +27,7 @@ home network to the internet.
 
 - Home Assistant 2024.10.0 or newer
 - An Ezlo Cloud HARC account — a free trial is available
-  ([get started](https://ezlo.com/page/homeassistant))
+  ([get started](https://www.ezlo.com/pages/home-assistant))
 - A Home Assistant host with outbound internet access
 
 ## Installation
@@ -103,7 +103,7 @@ can attach to a support request.
 
 - Issues and feature requests:
   <https://github.com/ezloteam/homeassistant-ezlo-cloud/issues>
-- Product info and plans: <https://ezlo.com/page/homeassistant>
+- Product info and plans: <https://www.ezlo.com/pages/home-assistant>
 
 ## License
 

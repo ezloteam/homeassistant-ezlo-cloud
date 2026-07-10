@@ -3,11 +3,11 @@
   "name": "Ezlo Cloud HARC",
   "codeowners": ["@ezloteam"],
   "config_flow": true,
-  "documentation": "https://ezlo.com/page/homeassistant",
+  "documentation": "https://www.ezlo.com/pages/home-assistant",
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/ezloteam/home-assistant-ezlo-cloud/issues",
   "quality_scale": "platinum",
   "requirements": ["tomlkit==0.13.2"],
-  "version": "1.1.0"
+  "version": "1.0.5"
 }

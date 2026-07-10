@@ -36,39 +36,34 @@ ISSUE_TRUSTED_PROXIES_RESTART = "restart_required_for_trusted_proxies"
 class SubscriptionStatus(StrEnum):
     """Subscription state values from the Ezlo Cloud backend."""
 
-    # Access granted by the central Ezlo subscription service's HARC feature
-    # entitlement — the normal state for a subscribed regular user.
-    FEATURE_HARC = "feature_harc"
-    # Legacy Stripe-managed states (kept until pre-central rows age out)
+    # Stripe-managed states
     TRIALING = "trialing"
     ACTIVE = "active"
     PAST_DUE = "past_due"
     CANCELED = "canceled"
     INCOMPLETE = "incomplete"
-    # Regular user with no subscription row at all — remediation is the
-    # central subscribe URL provided by the backend.
-    NONE = "none"
-    # Access classes managed by Ezlo operators
+    # Non-Stripe access classes managed by Ezlo operators
     INTERNAL = "internal"
     PARTNER_TRIAL = "partner_trial"
     PARTNER_TRIAL_EXPIRED = "partner_trial_expired"
+    # Non-Stripe trial auto-provisioned while billing is parked
+    INTERNAL_TRIAL = "internal_trial"
 
 
 # States that grant access to the integration
 SUBSCRIPTION_VALID_STATES: frozenset[str] = frozenset(
     {
-        SubscriptionStatus.FEATURE_HARC,
         SubscriptionStatus.TRIALING,
         SubscriptionStatus.ACTIVE,
         SubscriptionStatus.INTERNAL,
         SubscriptionStatus.PARTNER_TRIAL,
+        SubscriptionStatus.INTERNAL_TRIAL,
     }
 )
-# States that require remediation (subscribe on the Ezlo billing page for
-# regular users, contact account manager for partners)
+# States that require remediation (resubscribe for Stripe users, contact
+# account manager for partners)
 SUBSCRIPTION_INVALID_STATES: frozenset[str] = frozenset(
     {
-        SubscriptionStatus.NONE,
         SubscriptionStatus.PAST_DUE,
         SubscriptionStatus.CANCELED,
         SubscriptionStatus.INCOMPLETE,

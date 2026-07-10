@@ -11,12 +11,15 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.helpers.instance_id import async_get as async_get_instance_id
+from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from .api import (
     AuthResult,
     SubscriptionStatusResult,
     UserDict,
     authenticate,
+    create_stripe_session,
+    get_integration_config,
     get_subscription_status,
     signup,
 )
@@ -133,6 +136,21 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
         api_uri = self._config_entry.data.get(CONF_API_URI) or DEFAULT_API_URI
         return str(api_uri)
 
+    def _get_base_url(self) -> str:
+        """Get the best URL for Stripe redirect."""
+        try:
+            return get_url(self.hass, allow_internal=False, allow_external=True)
+        except NoURLAvailableError:
+            pass
+        try:
+            return get_url(self.hass, require_current_request=True)
+        except NoURLAvailableError:
+            pass
+        try:
+            return get_url(self.hass)
+        except NoURLAvailableError:
+            return "http://homeassistant.local:8123"
+
     def _with_advanced(self, menu_options: dict[str, str]) -> dict[str, str]:
         """Append the advanced entry to a menu when advanced options are on."""
         if self.show_advanced_options:
@@ -157,7 +175,6 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                         {
                             "subscribe": "Resubscribe",
                             "cloud_status": "Cloud Connection Status",
-                            "view_status": "Subscription Status",
                             "logout": "Logout",
                         }
                     ),
@@ -168,7 +185,6 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                 menu_options=self._with_advanced(
                     {
                         "cloud_status": "Cloud Connection Status",
-                        "view_status": "Subscription Status",
                         "logout": "Logout",
                     }
                 ),
@@ -313,9 +329,6 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                             "auth_token": result.token,
                             "tunnel_token": result.tunnel_token,
                             "user": dict(result.user),
-                            # Authenticated even though unsubscribed — keep logged in
-                            # so the menu shows the subscription options, not Login.
-                            "is_logged_in": True,
                             "subscription_status": result.subscription_status,
                             "trial_ends_at": result.trial_ends_at,
                             "payment_required": True,
@@ -351,7 +364,7 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_signup(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Handle account signup."""
+        """Handle signup with free trial."""
         errors: dict[str, str] = {}
         signup_error_detail = ""
 
@@ -394,9 +407,6 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                         "auth_token": result.token,
                         "tunnel_token": result.tunnel_token,
                         "user": dict(result.user),
-                        # Authenticated even though unsubscribed — keep logged in
-                        # so the menu shows the subscription options, not Login.
-                        "is_logged_in": True,
                         "subscription_status": result.subscription_status,
                         "trial_ends_at": result.trial_ends_at,
                         "payment_required": True,
@@ -422,20 +432,14 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
             description_placeholders={"error_detail": signup_error_detail},
         )
 
-    # ── Subscribe (central Ezlo subscription) ────────────────────
+    # ── Subscribe (Stripe payment) ───────────────────────────────
 
     async def async_step_subscribe(
         self,
         user_input: dict[str, Any] | None = None,
         checkout_url: str | None = None,
     ) -> config_entries.ConfigFlowResult:
-        """Show the central Ezlo subscribe link for new signup or resubscription.
-
-        If checkout_url is supplied (from the signup/login response), use it
-        directly. Otherwise (resubscribe path) fetch the subscribe URL from
-        the subscription-status endpoint — the backend builds it pre-filled
-        with the user's email.
-        """
+        """Handle Stripe Checkout for new signup or resubscription."""
         config_data = self._config_entry.data
         user_data = config_data.get("user", {}) or {}
         user_uuid = user_data.get("uuid")
@@ -455,16 +459,36 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
 
         if not checkout_url:
             try:
-                status = await get_subscription_status(
-                    self.hass, user_uuid, api_uri=self._get_api_uri()
+                cfg = await get_integration_config(
+                    self.hass, api_uri=self._get_api_uri()
                 )
             except EzloError as err:
-                _LOGGER.error("Could not fetch subscribe URL: %s", err)
-                return self.async_abort(reason="subscribe_unavailable")
-            checkout_url = status.subscribe_url
+                _LOGGER.error("Could not load integration config: %s", err)
+                return self.async_abort(reason="config_unavailable")
+
+            price_id = cfg.get("stripe_price_id")
+            if not price_id:
+                _LOGGER.error("integration config response missing stripe_price_id")
+                return self.async_abort(reason="config_unavailable")
+
+            back_url = (
+                f"{self._get_base_url()}/config/integrations/integration/ezlocloudharc"
+            )
+            try:
+                session = await create_stripe_session(
+                    self.hass,
+                    user_uuid,
+                    price_id,
+                    back_url,
+                    api_uri=self._get_api_uri(),
+                )
+            except EzloError as err:
+                _LOGGER.error("Stripe session failed: %s", err)
+                return self.async_abort(reason="stripe_failed")
+            checkout_url = session.checkout_url
 
         if not checkout_url:
-            return self.async_abort(reason="subscribe_unavailable")
+            return self.async_abort(reason="stripe_failed")
 
         pending_user: dict[str, Any]
         if self._pending_auth is not None:
@@ -581,9 +605,9 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                     tunnel_token=tunnel_token,
                     user=user,
                     subscription_status=status.status,
-                    is_trial=status.is_trial,
+                    is_trial=status.status == SubscriptionStatus.TRIALING.value,
                     payment_required=False,
-                    trial_ends_at=status.trial_ends_at or None,
+                    trial_ends_at=status.end_timestamp or None,
                     checkout_url=None,
                 )
                 await self._handle_successful_login(synthetic)
@@ -648,9 +672,8 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                 return SubscriptionStatusResult(
                     status=str(cached.get("status", "unknown")),
                     is_active=bool(cached.get("is_active", False)),
-                    is_trial=bool(cached.get("is_trial", False)),
-                    trial_ends_at=str(cached.get("trial_ends_at", "")),
-                    subscribe_url=str(cached.get("subscribe_url", "")),
+                    start_timestamp=str(cached.get("start_timestamp", "")),
+                    end_timestamp=str(cached.get("end_timestamp", "")),
                 )
 
         try:
@@ -667,20 +690,48 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                 {
                     "status": result.status,
                     "is_active": result.is_active,
-                    "is_trial": result.is_trial,
-                    "trial_ends_at": result.trial_ends_at,
-                    "subscribe_url": result.subscribe_url,
+                    "start_timestamp": result.start_timestamp,
+                    "end_timestamp": result.end_timestamp,
                 },
             )
         return result
+
+    # ── Stripe return handlers ───────────────────────────────────
+
+    async def async_step_stripe_finish(
+        self, user_input: dict[str, Any] | None = None
+    ) -> None:
+        """Handle return from Stripe redirect with flow_id."""
+        _LOGGER.info("Stripe checkout finished, resuming flow")
+        new_data = dict(self._config_entry.data)
+        new_data["subscription_status"] = SubscriptionStatus.ACTIVE.value
+        self.hass.config_entries.async_update_entry(self._config_entry, data=new_data)
+
+    async def async_step_redirecting(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """User returned from Stripe. Check payment status."""
+        if self._config_entry.data.get("is_logged_in"):
+            sub = self._config_entry.data.get("subscription_status")
+            placeholders = self._get_abort_placeholders()
+            if sub == SubscriptionStatus.ACTIVE.value:
+                return self.async_abort(
+                    reason="subscription_activated",
+                    description_placeholders=placeholders,
+                )
+            return self.async_abort(
+                reason="login_successful",
+                description_placeholders=placeholders,
+            )
+
+        return self.async_abort(reason="stripe_redirect_finished")
+
 
 # ── Module-private helpers ────────────────────────────────────────
 
 
 def _trial_text_for_status(sub_status: str | None, trial_ends_at: str | None) -> str:
     """Render the contextual trial/subscription text for a status."""
-    if sub_status == SubscriptionStatus.FEATURE_HARC.value:
-        return "Your Ezlo subscription is active."
     if sub_status == SubscriptionStatus.TRIALING.value:
         days = compute_trial_days(trial_ends_at)
         if days is not None:
@@ -692,6 +743,8 @@ def _trial_text_for_status(sub_status: str | None, trial_ends_at: str | None) ->
             "You are on a free trial. "
             "Your card will be charged automatically when the trial ends."
         )
+    if sub_status == SubscriptionStatus.INTERNAL_TRIAL.value:
+        return "You are on a free trial."
     if sub_status == SubscriptionStatus.INTERNAL.value:
         return "Internal user — unlimited access. No subscription required."
     if sub_status == SubscriptionStatus.PARTNER_TRIAL.value:
@@ -716,9 +769,4 @@ def _trial_text_for_status(sub_status: str | None, trial_ends_at: str | None) ->
         )
     if sub_status == SubscriptionStatus.CANCELED.value:
         return "Your subscription was canceled. Resubscribe to restore remote access."
-    if sub_status == SubscriptionStatus.NONE.value:
-        return (
-            "You don't have an active subscription. "
-            "Subscribe to enable remote access."
-        )
     return ""

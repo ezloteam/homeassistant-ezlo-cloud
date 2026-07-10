@@ -84,24 +84,15 @@ async def test_setup_entry_missing_token_raises_auth_failed(
         await async_setup_entry(hass, entry)
 
 
-async def test_setup_entry_payment_required_loads_idle_no_tunnel(
+async def test_setup_entry_payment_required_raises_auth_failed(
     hass: HomeAssistant,
 ) -> None:
-    """A payment_required entry loads successfully and idles (no reauth, no tunnel).
-
-    Authentication succeeded; the user just isn't subscribed. Setup must return
-    True (credentials stay saved, no reauth prompt) and must NOT start frpc.
-    """
+    """A payment_required entry raises ConfigEntryAuthFailed so reauth fires."""
     entry = _entry(payment_required=True)
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.ezlocloudharc.start_frpc", AsyncMock()
-    ) as start_frpc:
-        result = await async_setup_entry(hass, entry)
-
-    assert result is True
-    start_frpc.assert_not_awaited()
+    with pytest.raises(ConfigEntryAuthFailed):
+        await async_setup_entry(hass, entry)
 
 
 async def test_setup_entry_missing_uuid_raises_auth_failed(
@@ -166,10 +157,10 @@ async def test_setup_entry_install_error_raises_not_ready(
         await async_setup_entry(hass, entry)
 
 
-async def test_setup_entry_subscription_expired_writes_canceled_and_idles(
+async def test_setup_entry_subscription_expired_writes_canceled_then_auth_failed(
     hass: HomeAssistant,
 ) -> None:
-    """A runtime 402 marks the entry canceled + idles (no tunnel, no reauth)."""
+    """EzloSubscriptionExpiredError marks the entry canceled + raises auth-failed."""
     entry = _entry()
     entry.add_to_hass(hass)
 
@@ -190,14 +181,10 @@ async def test_setup_entry_subscription_expired_writes_canceled_and_idles(
             "custom_components.ezlocloudharc.is_trusted_proxy_configured",
             return_value=True,
         ),
-        patch(
-            "custom_components.ezlocloudharc.start_frpc", AsyncMock()
-        ) as start_frpc,
+        pytest.raises(ConfigEntryAuthFailed),
     ):
-        result = await async_setup_entry(hass, entry)
+        await async_setup_entry(hass, entry)
 
-    assert result is True
-    start_frpc.assert_not_awaited()
     assert entry.data["subscription_status"] == SubscriptionStatus.CANCELED.value
     assert entry.data["payment_required"] is True
 

@@ -34,6 +34,10 @@ def _auth_api_url(api_uri: str) -> str:
     return f"{api_uri}/api/auth"
 
 
+def _stripe_api_url(api_uri: str) -> str:
+    return f"{api_uri}/api/stripe"
+
+
 def _api_url(api_uri: str) -> str:
     return f"{api_uri}/api"
 
@@ -66,19 +70,20 @@ class AuthResult:
 
 
 @dataclass(slots=True)
-class SubscriptionStatusResult:
-    """Result of fetching the live subscription status from the backend.
+class StripeSession:
+    """Result of creating a Stripe Checkout session."""
 
-    subscribe_url is set by the backend when the user has no active
-    subscription and can self-serve — it points at the central Ezlo
-    subscribe flow, pre-filled with the user's email.
-    """
+    checkout_url: str
+
+
+@dataclass(slots=True)
+class SubscriptionStatusResult:
+    """Result of fetching the live subscription status from the backend."""
 
     status: str
     is_active: bool
-    is_trial: bool
-    trial_ends_at: str
-    subscribe_url: str
+    start_timestamp: str
+    end_timestamp: str
 
 
 # ── HTTP helpers ─────────────────────────────────────────────────────
@@ -258,6 +263,56 @@ async def signup(
     )
 
 
+# ── Stripe checkout ─────────────────────────────────────────────────
+
+
+async def create_stripe_session(
+    hass: HomeAssistant,
+    user_id: str,
+    price_id: str,
+    back_ref_url: str,
+    *,
+    api_uri: str = DEFAULT_API_URI,
+) -> StripeSession:
+    """Create a Stripe Checkout session.
+
+    Raises:
+        EzloApiUnreachableError: network failure.
+        EzloApiUnexpectedResponseError: missing checkout_url in response.
+    """
+    payload = {
+        "user_id": user_id,
+        "plan_price_id": price_id,
+        "back_ref_url": back_ref_url,
+    }
+
+    client = get_async_client(hass)
+    try:
+        response = await client.post(
+            f"{_stripe_api_url(api_uri)}/create-session", json=payload, timeout=10
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as err:
+        raise EzloApiUnexpectedResponseError(_extract_error_message(err.response)) from err
+    except httpx.HTTPError as err:
+        raise EzloApiUnreachableError(str(err)) from err
+
+    try:
+        data = response.json()
+    except (ValueError, json.JSONDecodeError) as err:
+        raise EzloApiUnexpectedResponseError(str(err)) from err
+
+    if not (isinstance(data, dict) and data.get("status") is True):
+        message = data.get("error", "Unknown error") if isinstance(data, dict) else "Unknown error"
+        raise EzloApiUnexpectedResponseError(message)
+
+    checkout_url = data.get("data", {}).get("checkout_url")
+    if not isinstance(checkout_url, str) or not checkout_url:
+        raise EzloApiUnexpectedResponseError("Missing checkout URL in Stripe response")
+
+    return StripeSession(checkout_url=checkout_url)
+
+
 # ── Subscription status ─────────────────────────────────────────────
 
 
@@ -300,10 +355,50 @@ async def get_subscription_status(
     return SubscriptionStatusResult(
         status=str(data.get("status", "unknown")),
         is_active=bool(data.get("is_active", False)),
-        is_trial=bool(data.get("is_trial", False)),
-        trial_ends_at=str(data.get("trial_ends_at", "") or ""),
-        subscribe_url=str(data.get("subscribe_url", "") or ""),
+        start_timestamp=str(data.get("start_timestamp", "")),
+        end_timestamp=str(data.get("end_timestamp", "")),
     )
+
+
+# ── Public integration config ───────────────────────────────────────
+
+
+async def get_integration_config(
+    hass: HomeAssistant,
+    *,
+    api_uri: str = DEFAULT_API_URI,
+) -> dict[str, Any]:
+    """Fetch public integration config (Stripe price id, etc.).
+
+    The result is intentionally not cached at module scope — callers may
+    cache the result on `entry.runtime_data` if they need to.
+
+    Raises:
+        EzloApiUnreachableError: network failure.
+        EzloApiUnexpectedResponseError: missing data section.
+    """
+    client = get_async_client(hass)
+    try:
+        response = await client.get(
+            f"{_api_url(api_uri)}/integration/config", timeout=5
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as err:
+        raise EzloApiUnexpectedResponseError(
+            f"http_{err.response.status_code}: {_extract_error_message(err.response)}"
+        ) from err
+    except httpx.HTTPError as err:
+        raise EzloApiUnreachableError(str(err)) from err
+
+    try:
+        payload = response.json()
+    except (ValueError, json.JSONDecodeError) as err:
+        raise EzloApiUnexpectedResponseError(str(err)) from err
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        raise EzloApiUnexpectedResponseError("No integration config data returned")
+    return data
 
 
 # ── JWT helpers ─────────────────────────────────────────────────────

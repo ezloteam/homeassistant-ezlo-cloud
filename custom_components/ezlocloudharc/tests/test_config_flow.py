@@ -145,9 +145,8 @@ async def test_signup_success_creates_entry_with_payment_required(
 ) -> None:
     """Signup that returns payment_required still creates the entry.
 
-    Authentication succeeded, so is_logged_in is True (credentials saved);
-    payment_required stays True separately so setup idles the tunnel and the
-    options flow surfaces the subscribe link.
+    is_logged_in is False so the options flow's resubscribe path can
+    surface the Stripe checkout.
     """
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -170,7 +169,7 @@ async def test_signup_success_creates_entry_with_payment_required(
     data = result["data"]
     assert data["user"]["uuid"] == USER_UUID
     assert data["payment_required"] is True
-    assert data["is_logged_in"] is True
+    assert data["is_logged_in"] is False
 
 
 async def test_signup_failure_shows_backend_error(hass: HomeAssistant) -> None:
