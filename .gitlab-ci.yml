@@ -6,7 +6,7 @@ variables:
   GITHUB_REPO: "ezloteam/homeassistant-ezlo-cloud"
   # Space-separated paths that live ONLY on GitLab and must never be mirrored
   # to the public GitHub repo (stripped from the squashed commit below).
-  GITHUB_EXCLUDE: "CONTRIBUTING.md"
+  GITHUB_EXCLUDE: "CONTRIBUTING.md CLAUDE.md"
 
 sync-to-github:
   stage: sync
