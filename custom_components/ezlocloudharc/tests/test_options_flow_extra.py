@@ -49,6 +49,12 @@ def handler(
 @pytest.mark.parametrize(
     ("status", "trial_ends_at", "expected_phrase"),
     [
+        (
+            SubscriptionStatus.FEATURE_HARC.value,
+            None,
+            "Ezlo subscription is active",
+        ),
+        (SubscriptionStatus.NONE.value, None, "don't have an active subscription"),
         (SubscriptionStatus.TRIALING.value, "2099-01-01T00:00:00Z", "free trial"),
         (SubscriptionStatus.TRIALING.value, None, "free trial"),
         (SubscriptionStatus.INTERNAL.value, None, "Internal user"),
@@ -192,10 +198,11 @@ async def test_poll_payment_completes_on_active(
     responses = [
         EzloApiUnreachableError("transient"),
         SubscriptionStatusResult(
-            status=SubscriptionStatus.ACTIVE.value,
+            status=SubscriptionStatus.FEATURE_HARC.value,
             is_active=True,
-            start_timestamp="",
-            end_timestamp="",
+            is_trial=False,
+            trial_ends_at="",
+            subscribe_url="",
         ),
     ]
     with (
@@ -220,7 +227,7 @@ async def test_poll_payment_completes_on_active(
 
     handle_login.assert_awaited_once()
     auth_result = handle_login.await_args.args[0]
-    assert auth_result.subscription_status == SubscriptionStatus.ACTIVE.value
+    assert auth_result.subscription_status == SubscriptionStatus.FEATURE_HARC.value
 
 
 async def test_poll_payment_times_out_without_login(
@@ -230,8 +237,9 @@ async def test_poll_payment_times_out_without_login(
     not_active = SubscriptionStatusResult(
         status=SubscriptionStatus.INCOMPLETE.value,
         is_active=False,
-        start_timestamp="",
-        end_timestamp="",
+        is_trial=False,
+        trial_ends_at="",
+        subscribe_url="",
     )
     with (
         patch(

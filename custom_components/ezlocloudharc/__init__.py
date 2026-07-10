@@ -68,18 +68,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: EzloConfigEntry) -> bool
 
     config = entry.data
     token = config.get("auth_token")
-    if not token:
-        # Without credentials we can still register the entry so the options
-        # flow can prompt the user for login. Surface a reauth flow.
-        raise ConfigEntryAuthFailed("Ezlo Cloud HARC credentials missing")
-
-    if config.get("payment_required"):
-        raise ConfigEntryAuthFailed("Ezlo Cloud HARC subscription requires payment")
-
     user = config.get("user") or {}
     uuid = user.get("uuid")
-    if not uuid:
-        raise ConfigEntryAuthFailed("Ezlo Cloud HARC token is missing a user identifier")
+
+    # Logged out (or credentials cleared): load the entry idle so the Reconfigure
+    # and Configure surfaces stay available to log in. No tunnel, no reauth prompt.
+    if not token or not uuid:
+        _LOGGER.info(
+            "Ezlo Cloud HARC: no stored credentials; entry idle (log in via the "
+            "integration options / reconfigure)"
+        )
+        return True
+
+    # Authenticated but not subscribed: load the entry successfully and idle —
+    # credentials stay saved, no reauth prompt, and the tunnel is NOT started.
+    # The user completes payment via the options flow (Configure), which reloads
+    # the entry on success so the subscribed path below starts the tunnel.
+    # NOTE: payment_required is NOT an auth failure — raising ConfigEntryAuthFailed
+    # here is what previously forced the spurious re-authenticate prompt.
+    if config.get("payment_required"):
+        _LOGGER.info(
+            "Ezlo Cloud HARC: user %s authenticated but has no active subscription; "
+            "tunnel not started (complete subscription via the integration options)",
+            uuid,
+        )
+        return True
 
     # Surface the trusted_proxies requirement as a repair issue rather than
     # mutating the user's configuration.yaml.
@@ -112,12 +125,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: EzloConfigEntry) -> bool
         )
     except EzloAuthError as err:
         raise ConfigEntryAuthFailed(str(err)) from err
-    except EzloSubscriptionExpiredError as err:
+    except EzloSubscriptionExpiredError:
+        # Subscription lapsed at runtime (server-config returned 402). This is a
+        # subscription state, not an auth failure — record it and idle without a
+        # tunnel or a reauth prompt. The options flow surfaces resubscribe.
         new_data = dict(entry.data)
         new_data["subscription_status"] = SubscriptionStatus.CANCELED.value
         new_data["payment_required"] = True
         hass.config_entries.async_update_entry(entry, data=new_data)
-        raise ConfigEntryAuthFailed(str(err)) from err
+        _LOGGER.info(
+            "Ezlo Cloud HARC: subscription for user %s is no longer active; "
+            "tunnel not started (resubscribe via the integration options)",
+            uuid,
+        )
+        return True
     except EzloError as err:
         raise ConfigEntryNotReady(str(err)) from err
 

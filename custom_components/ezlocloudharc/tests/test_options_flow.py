@@ -11,12 +11,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.helpers.network import NoURLAvailableError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ezlocloudharc.api import (
     AuthResult,
-    StripeSession,
     SubscriptionStatusResult,
     UserDict,
 )
@@ -55,11 +53,15 @@ def _auth_result(*, payment_required: bool = False) -> AuthResult:
             email="alice@example.com",
             ezlo_id=42,
         ),
-        subscription_status="" if payment_required else SubscriptionStatus.ACTIVE.value,
+        subscription_status=(
+            SubscriptionStatus.NONE.value
+            if payment_required
+            else SubscriptionStatus.FEATURE_HARC.value
+        ),
         is_trial=False,
         payment_required=payment_required,
         trial_ends_at=None,
-        checkout_url="https://checkout.stripe.com/abc" if payment_required else None,
+        checkout_url=None,
     )
 
 
@@ -132,52 +134,108 @@ async def test_init_not_logged_in_shows_login_signup(
     assert "signup" in result["menu_options"]
 
 
-async def test_init_logged_in_shows_cloud_status(
-    hass: HomeAssistant,
-    configured_entry: MockConfigEntry,
-    handler: EzloOptionsFlowHandler,
-) -> None:
-    """When logged in with valid sub, the menu shows status options."""
-    hass.config_entries.async_update_entry(
-        configured_entry,
-        data={
-            **configured_entry.data,
-            "is_logged_in": True,
-            "subscription_status": SubscriptionStatus.ACTIVE.value,
-        },
-    )
-    result = await handler.async_step_init()
-    assert result["type"] is FlowResultType.MENU
-    assert "cloud_status" in result["menu_options"]
-    assert "logout" in result["menu_options"]
-    assert "subscribe" not in result["menu_options"]
-
-
 @pytest.mark.parametrize(
     "status",
     [
-        SubscriptionStatus.PAST_DUE.value,
-        SubscriptionStatus.CANCELED.value,
-        SubscriptionStatus.PARTNER_TRIAL_EXPIRED.value,
+        SubscriptionStatus.ACTIVE.value,
+        SubscriptionStatus.FEATURE_HARC.value,
+        SubscriptionStatus.INTERNAL.value,
+        SubscriptionStatus.PARTNER_TRIAL.value,
     ],
 )
-async def test_init_invalid_subscription_shows_resubscribe(
+async def test_init_subscribed_shows_details_and_logout(
     hass: HomeAssistant,
     configured_entry: MockConfigEntry,
     handler: EzloOptionsFlowHandler,
     status: str,
 ) -> None:
-    """Invalid subscription states surface a Resubscribe option."""
+    """Any access-granting state renders the flat details screen with Log out.
+
+    Covers the central (feature_harc) and admin-managed (internal/partner)
+    classes — all are valid access states, so no subscribe option appears.
+    """
     hass.config_entries.async_update_entry(
         configured_entry,
         data={
             **configured_entry.data,
             "is_logged_in": True,
+            "auth_token": "jwt",
+            "user": {"username": "alice"},
+            "server_name": "x.ezlo.com",
+            "subdomain": "abc",
             "subscription_status": status,
         },
     )
     result = await handler.async_step_init()
-    assert "subscribe" in result["menu_options"]
+    assert result["type"] is FlowResultType.MENU
+    assert "logout" in result["menu_options"]
+    assert "subscribe" not in result["menu_options"]
+    assert "Remote URL" in result["description_placeholders"]["body"]
+
+
+@pytest.mark.parametrize(
+    "status",
+    [SubscriptionStatus.NONE.value, SubscriptionStatus.PAST_DUE.value, SubscriptionStatus.CANCELED.value],
+)
+async def test_init_regular_unsubscribed_shows_subscribe_link(
+    hass: HomeAssistant,
+    configured_entry: MockConfigEntry,
+    handler: EzloOptionsFlowHandler,
+    status: str,
+) -> None:
+    """Regular self-serve states surface the subscribe link in the body + Log out."""
+    hass.config_entries.async_update_entry(
+        configured_entry,
+        data={
+            **configured_entry.data,
+            "is_logged_in": True,
+            "user": {"uuid": USER_UUID, "username": "alice"},
+            "auth_token": "jwt",
+            "subscription_status": status,
+        },
+    )
+    with (
+        patch(
+            "custom_components.ezlocloudharc.options_flow.get_subscription_status",
+            AsyncMock(return_value=_status_result(status=status, subscribe_url=SUBSCRIBE_URL)),
+        ),
+        patch.object(handler, "_ensure_payment_poll"),
+    ):
+        result = await handler.async_step_init()
+    assert result["type"] is FlowResultType.MENU
+    assert "logout" in result["menu_options"]
+    assert "subscribe" not in result["menu_options"]
+    body = result["description_placeholders"]["body"]
+    assert SUBSCRIBE_URL in body
+    assert "alice" in body  # logged-in username is shown alongside the link
+
+
+async def test_init_partner_expired_shows_contact_manager(
+    hass: HomeAssistant,
+    configured_entry: MockConfigEntry,
+    handler: EzloOptionsFlowHandler,
+) -> None:
+    """Partner-expired can't self-serve: contact-manager message, no link, no fetch."""
+    hass.config_entries.async_update_entry(
+        configured_entry,
+        data={
+            **configured_entry.data,
+            "is_logged_in": True,
+            "auth_token": "jwt",
+            "user": {"uuid": USER_UUID},
+            "subscription_status": SubscriptionStatus.PARTNER_TRIAL_EXPIRED.value,
+        },
+    )
+    with patch(
+        "custom_components.ezlocloudharc.options_flow.get_subscription_status",
+        AsyncMock(),
+    ) as fetch_status:
+        result = await handler.async_step_init()
+    assert result["type"] is FlowResultType.MENU
+    assert "logout" in result["menu_options"]
+    assert "subscribe" not in result["menu_options"]
+    assert "account manager" in result["description_placeholders"]["body"].lower()
+    fetch_status.assert_not_awaited()
 
 
 # ── async_step_login ────────────────────────────────────────────────
@@ -264,12 +322,16 @@ async def test_login_success_aborts_login_successful(
     assert configured_entry.data["is_logged_in"] is True
 
 
-async def test_login_payment_required_routes_to_subscribe(
+async def test_login_payment_required_persists_and_shows_init(
     hass: HomeAssistant,
     configured_entry: MockConfigEntry,
     handler: EzloOptionsFlowHandler,
 ) -> None:
-    """payment_required=True routes through async_step_subscribe."""
+    """payment_required=True keeps the user logged in and renders the init screen.
+
+    Authentication succeeded → credentials saved, is_logged_in=True,
+    payment_required=True; the flat init screen then surfaces the subscribe link.
+    """
     with (
         patch(
             "custom_components.ezlocloudharc.options_flow.authenticate",
@@ -279,15 +341,18 @@ async def test_login_payment_required_routes_to_subscribe(
             "custom_components.ezlocloudharc.options_flow.async_get_instance_id",
             AsyncMock(return_value="ha-uuid"),
         ),
+        patch(
+            "custom_components.ezlocloudharc.options_flow.get_subscription_status",
+            AsyncMock(return_value=_status_result(subscribe_url=SUBSCRIBE_URL)),
+        ),
+        patch.object(handler, "_ensure_payment_poll"),
     ):
         result = await handler.async_step_login({"username": "u", "password": "p"})
 
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "subscribe"
-    assert (
-        result["description_placeholders"]["url"] == "https://checkout.stripe.com/abc"
-    )
-    assert configured_entry.data.get("is_logged_in") is not True
+    assert result["type"] is FlowResultType.MENU
+    assert "logout" in result["menu_options"]
+    assert configured_entry.data["is_logged_in"] is True
+    assert configured_entry.data["payment_required"] is True
 
 
 # ── async_step_signup ───────────────────────────────────────────────
@@ -323,10 +388,10 @@ async def test_signup_failure_shows_backend_error(
     assert result["errors"] == {"base": "signup_failed"}
 
 
-async def test_signup_payment_required_routes_to_subscribe(
+async def test_signup_payment_required_persists_and_shows_init(
     handler: EzloOptionsFlowHandler,
 ) -> None:
-    """Successful signup with payment_required routes to subscribe."""
+    """Successful signup with payment_required renders the init subscribe screen."""
     with (
         patch(
             "custom_components.ezlocloudharc.options_flow.signup",
@@ -336,12 +401,17 @@ async def test_signup_payment_required_routes_to_subscribe(
             "custom_components.ezlocloudharc.options_flow.async_get_instance_id",
             AsyncMock(return_value="ha-uuid"),
         ),
+        patch(
+            "custom_components.ezlocloudharc.options_flow.get_subscription_status",
+            AsyncMock(return_value=_status_result(subscribe_url=SUBSCRIBE_URL)),
+        ),
+        patch.object(handler, "_ensure_payment_poll"),
     ):
         result = await handler.async_step_signup(
             {"username": "u", "email": "u@x.com", "password": "p"}
         )
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "subscribe"
+    assert result["type"] is FlowResultType.MENU
+    assert "logout" in result["menu_options"]
 
 
 # ── async_step_logout ───────────────────────────────────────────────
@@ -373,235 +443,28 @@ async def test_logout_clears_state_and_stops_frpc(
     stop.assert_awaited_once()
 
 
-# ── async_step_cloud_status ─────────────────────────────────────────
+# ── Subscribe-link helpers (used by the init tests above) ───────────
 
 
-async def test_cloud_status_renders_connected_with_url(
-    hass: HomeAssistant,
-    configured_entry: MockConfigEntry,
-    handler: EzloOptionsFlowHandler,
-) -> None:
-    """When connected and frp info present, cloud_status shows the URL."""
-    configured_entry.runtime_data.is_connected = True  # type: ignore[union-attr]
-    hass.config_entries.async_update_entry(
-        configured_entry,
-        data={
-            **configured_entry.data,
-            "user": {"username": "alice"},
-            "server_name": "x.ezlo.com",
-            "subdomain": "abc",
-            "subscription_status": SubscriptionStatus.ACTIVE.value,
-        },
+SUBSCRIBE_URL = (
+    "https://api-cloud.ezlo.com/api/v4/subscription/1/subscribe"
+    "?cadence=monthly&email=u%40x.com&plan=ezlo_harc_only"
+)
+
+
+def _status_result(
+    *,
+    status: str = "none",
+    is_active: bool = False,
+    subscribe_url: str = "",
+) -> SubscriptionStatusResult:
+    return SubscriptionStatusResult(
+        status=status,
+        is_active=is_active,
+        is_trial=False,
+        trial_ends_at="",
+        subscribe_url=subscribe_url,
     )
-    result = await handler.async_step_cloud_status()
-    assert result["type"] is FlowResultType.MENU
-    assert result["description_placeholders"]["connection_status"] == "Connected"
-    assert result["description_placeholders"]["cloud_url"] == "https://abc.x.ezlo.com"
-    assert result["description_placeholders"]["username"] == "alice"
-
-
-async def test_cloud_status_no_cloud_url(
-    hass: HomeAssistant,
-    configured_entry: MockConfigEntry,
-    handler: EzloOptionsFlowHandler,
-) -> None:
-    """Missing subdomain/server_name reports 'Not available'."""
-    hass.config_entries.async_update_entry(
-        configured_entry,
-        data={**configured_entry.data, "is_logged_in": True, "user": {}},
-    )
-    result = await handler.async_step_cloud_status()
-    assert result["description_placeholders"]["cloud_url"] == "Not available"
-    assert result["description_placeholders"]["username"] == "Unknown"
-
-
-# ── async_step_subscribe ────────────────────────────────────────────
-
-
-async def test_subscribe_with_prebuilt_checkout_url(
-    hass: HomeAssistant,
-    configured_entry: MockConfigEntry,
-    handler: EzloOptionsFlowHandler,
-) -> None:
-    """A pre-supplied checkout_url is shown directly (no Stripe call)."""
-    hass.config_entries.async_update_entry(
-        configured_entry,
-        data={
-            **configured_entry.data,
-            "user": {"uuid": USER_UUID},
-            "auth_token": "jwt",
-        },
-    )
-    with patch(
-        "custom_components.ezlocloudharc.options_flow.create_stripe_session",
-        AsyncMock(),
-    ) as create_session:
-        result = await handler.async_step_subscribe(
-            checkout_url="https://prebuilt.example.com"
-        )
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "subscribe"
-    assert (
-        result["description_placeholders"]["url"] == "https://prebuilt.example.com"
-    )
-    create_session.assert_not_awaited()
-
-
-async def test_subscribe_fetches_checkout_url_when_none_supplied(
-    hass: HomeAssistant,
-    configured_entry: MockConfigEntry,
-    handler: EzloOptionsFlowHandler,
-) -> None:
-    """No URL supplied → fetches integration config + mints a Stripe session."""
-    hass.config_entries.async_update_entry(
-        configured_entry,
-        data={
-            **configured_entry.data,
-            "user": {"uuid": USER_UUID},
-            "auth_token": "jwt",
-        },
-    )
-    with (
-        patch(
-            "custom_components.ezlocloudharc.options_flow.get_integration_config",
-            AsyncMock(return_value={"stripe_price_id": "price_xyz"}),
-        ),
-        patch(
-            "custom_components.ezlocloudharc.options_flow.create_stripe_session",
-            AsyncMock(
-                return_value=StripeSession(checkout_url="https://fresh.example.com")
-            ),
-        ) as create_session,
-    ):
-        result = await handler.async_step_subscribe()
-
-    assert result["description_placeholders"]["url"] == "https://fresh.example.com"
-    create_session.assert_awaited_once()
-    assert create_session.await_args.args[2] == "price_xyz"
-
-
-async def test_subscribe_aborts_when_no_user_uuid(
-    handler: EzloOptionsFlowHandler,
-) -> None:
-    """No user uuid in entry data → session_expired."""
-    result = await handler.async_step_subscribe()
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "session_expired"
-
-
-async def test_subscribe_aborts_when_config_unavailable(
-    hass: HomeAssistant,
-    configured_entry: MockConfigEntry,
-    handler: EzloOptionsFlowHandler,
-) -> None:
-    """Integration-config fetch raising an EzloError aborts config_unavailable."""
-    hass.config_entries.async_update_entry(
-        configured_entry,
-        data={
-            **configured_entry.data,
-            "user": {"uuid": USER_UUID},
-            "auth_token": "jwt",
-        },
-    )
-    with patch(
-        "custom_components.ezlocloudharc.options_flow.get_integration_config",
-        AsyncMock(side_effect=EzloApiUnreachableError("dns")),
-    ):
-        result = await handler.async_step_subscribe()
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "config_unavailable"
-
-
-async def test_subscribe_aborts_when_stripe_session_fails(
-    hass: HomeAssistant,
-    configured_entry: MockConfigEntry,
-    handler: EzloOptionsFlowHandler,
-) -> None:
-    """Stripe API error during create-session aborts stripe_failed."""
-    hass.config_entries.async_update_entry(
-        configured_entry,
-        data={
-            **configured_entry.data,
-            "user": {"uuid": USER_UUID},
-            "auth_token": "jwt",
-        },
-    )
-    with (
-        patch(
-            "custom_components.ezlocloudharc.options_flow.get_integration_config",
-            AsyncMock(return_value={"stripe_price_id": "price_x"}),
-        ),
-        patch(
-            "custom_components.ezlocloudharc.options_flow.create_stripe_session",
-            AsyncMock(side_effect=EzloApiUnreachableError("down")),
-        ),
-    ):
-        result = await handler.async_step_subscribe()
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "stripe_failed"
-
-
-# ── view_status ─────────────────────────────────────────────────────
-
-
-async def test_view_status_invalid_state_shows_resubscribe(
-    hass: HomeAssistant,
-    configured_entry: MockConfigEntry,
-    handler: EzloOptionsFlowHandler,
-) -> None:
-    """past_due / canceled / partner_trial_expired exposes a Resubscribe button."""
-    hass.config_entries.async_update_entry(
-        configured_entry,
-        data={
-            **configured_entry.data,
-            "user": {"uuid": USER_UUID},
-            "subscription_status": SubscriptionStatus.PAST_DUE.value,
-        },
-    )
-    with patch(
-        "custom_components.ezlocloudharc.options_flow.get_subscription_status",
-        AsyncMock(
-            return_value=SubscriptionStatusResult(
-                status="past_due",
-                is_active=False,
-                start_timestamp="",
-                end_timestamp="",
-            )
-        ),
-    ):
-        result = await handler.async_step_view_status()
-    assert "subscribe" in result["menu_options"]
-    assert "init" in result["menu_options"]
-
-
-async def test_view_status_active_no_resubscribe(
-    hass: HomeAssistant,
-    configured_entry: MockConfigEntry,
-    handler: EzloOptionsFlowHandler,
-) -> None:
-    """An active subscription only shows the Back option."""
-    hass.config_entries.async_update_entry(
-        configured_entry,
-        data={
-            **configured_entry.data,
-            "user": {"uuid": USER_UUID},
-            "subscription_status": SubscriptionStatus.ACTIVE.value,
-        },
-    )
-    with patch(
-        "custom_components.ezlocloudharc.options_flow.get_subscription_status",
-        AsyncMock(
-            return_value=SubscriptionStatusResult(
-                status="active",
-                is_active=True,
-                start_timestamp="",
-                end_timestamp="",
-            )
-        ),
-    ):
-        result = await handler.async_step_view_status()
-    assert "subscribe" not in result["menu_options"]
-    assert "init" in result["menu_options"]
 
 
 # ── Advanced API endpoint override ──────────────────────────────────
@@ -691,27 +554,6 @@ async def test_advanced_step_clearing_field_removes_override(
     assert CONF_API_URI not in configured_entry.data
 
 
-# ── _get_base_url ───────────────────────────────────────────────────
-
-
-def test_get_base_url_prefers_external(handler: EzloOptionsFlowHandler) -> None:
-    """When an external URL is available, it is used."""
-    with patch(
-        "custom_components.ezlocloudharc.options_flow.get_url",
-        return_value="https://external.example.com",
-    ):
-        assert handler._get_base_url() == "https://external.example.com"
-
-
-def test_get_base_url_final_fallback(handler: EzloOptionsFlowHandler) -> None:
-    """If no URL can be resolved at all, falls back to homeassistant.local."""
-    with patch(
-        "custom_components.ezlocloudharc.options_flow.get_url",
-        side_effect=NoURLAvailableError,
-    ):
-        assert handler._get_base_url() == "http://homeassistant.local:8123"
-
-
 # ── classify_login_error ────────────────────────────────────────────
 
 
@@ -743,60 +585,3 @@ def test_classify_login_error_none_or_empty() -> None:
     assert key == "unknown"
 
 
-# ── Stripe return handlers ──────────────────────────────────────────
-
-
-async def test_stripe_finish_marks_active(
-    configured_entry: MockConfigEntry, handler: EzloOptionsFlowHandler
-) -> None:
-    """stripe_finish flips subscription_status to active."""
-    await handler.async_step_stripe_finish()
-    assert (
-        configured_entry.data["subscription_status"]
-        == SubscriptionStatus.ACTIVE.value
-    )
-
-
-async def test_redirecting_when_not_logged_in(
-    handler: EzloOptionsFlowHandler,
-) -> None:
-    """If not logged in yet, redirecting aborts with stripe_redirect_finished."""
-    result = await handler.async_step_redirecting()
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "stripe_redirect_finished"
-
-
-async def test_redirecting_when_active(
-    hass: HomeAssistant,
-    configured_entry: MockConfigEntry,
-    handler: EzloOptionsFlowHandler,
-) -> None:
-    """If logged in and active, aborts with subscription_activated."""
-    hass.config_entries.async_update_entry(
-        configured_entry,
-        data={
-            **configured_entry.data,
-            "is_logged_in": True,
-            "subscription_status": SubscriptionStatus.ACTIVE.value,
-        },
-    )
-    result = await handler.async_step_redirecting()
-    assert result["reason"] == "subscription_activated"
-
-
-async def test_redirecting_when_logged_in_trialing(
-    hass: HomeAssistant,
-    configured_entry: MockConfigEntry,
-    handler: EzloOptionsFlowHandler,
-) -> None:
-    """If logged in but not active, aborts with login_successful."""
-    hass.config_entries.async_update_entry(
-        configured_entry,
-        data={
-            **configured_entry.data,
-            "is_logged_in": True,
-            "subscription_status": SubscriptionStatus.TRIALING.value,
-        },
-    )
-    result = await handler.async_step_redirecting()
-    assert result["reason"] == "login_successful"

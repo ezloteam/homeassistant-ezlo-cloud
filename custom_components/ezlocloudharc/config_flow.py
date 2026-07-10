@@ -12,15 +12,20 @@ from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import callback
 from homeassistant.helpers.instance_id import async_get as async_get_instance_id
 
-from .api import AuthResult, authenticate, signup
-from .const import DOMAIN
+from .api import AuthResult, authenticate, get_subscription_status, signup
+from .const import CONF_API_URI, DEFAULT_API_URI, DOMAIN, SubscriptionStatus
 from .exceptions import (
     EzloApiUnreachableError,
     EzloAuthError,
     EzloError,
 )
 from .models import EzloConfigData, EzloConfigEntry, EzloUserData
-from .options_flow import EzloOptionsFlowHandler, classify_login_error
+from .options_flow import (
+    EzloOptionsFlowHandler,
+    FlowState,
+    classify_login_error,
+    entry_state,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,9 +33,12 @@ _LOGGER = logging.getLogger(__name__)
 def build_entry_data(result: AuthResult) -> EzloConfigData:
     """Shape an AuthResult into the dict stored on the config entry.
 
-    ``is_logged_in`` is True only when no Stripe checkout is pending — that
-    mirrors the options-flow logic and is what async_step_init in the
-    options flow uses to decide between login/signup and the status menu.
+    ``is_logged_in`` reflects authentication only — it is True whenever we hold a
+    token, independent of subscription state. An authenticated-but-unsubscribed
+    user is logged in (credentials saved, options flow shows the subscription
+    menu); ``payment_required`` / ``subscription_status`` separately gate whether
+    the tunnel starts. Conflating the two previously made unsubscribed logins look
+    like auth failures.
     """
     return EzloConfigData(
         auth_token=result.token,
@@ -41,7 +49,7 @@ def build_entry_data(result: AuthResult) -> EzloConfigData:
             email=result.user.get("email", ""),
             ezlo_id=result.user.get("ezlo_id", ""),
         ),
-        is_logged_in=not result.payment_required,
+        is_logged_in=bool(result.token),
         subscription_status=result.subscription_status,
         trial_ends_at=result.trial_ends_at,
         payment_required=result.payment_required,
@@ -118,7 +126,7 @@ class EzloHACloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         When the backend says payment is required, the entry is still
         created (with `payment_required=True`) so the user can complete
-        the Stripe checkout via the options flow's resubscribe path.
+        the central Ezlo subscription via the options flow's resubscribe path.
         """
         errors: dict[str, str] = {}
         signup_error_detail = ""
@@ -211,21 +219,100 @@ class EzloHACloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"error_detail": login_error_detail},
         )
 
-    # ── Reconfigure ────────────────────────────────────────────
+    # ── Reconfigure = state-driven action dispatcher ────────────
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Allow the user to update credentials in place."""
+        """Show the single action relevant to the entry's current state."""
+        entry = self._get_reconfigure_entry()
+        state = entry_state(entry.data)
+
+        if state is FlowState.LOGGED_OUT:
+            return self.async_show_menu(
+                step_id="reconfigure",
+                menu_options={
+                    "reconfigure_login": "Log in",
+                    "reconfigure_signup": "Create a new account",
+                },
+                description_placeholders={"body": "You are logged out."},
+            )
+
+        if state is FlowState.SUBSCRIBED:
+            return self.async_show_menu(
+                step_id="reconfigure",
+                menu_options={"reconfigure_logout": "Log out"},
+                description_placeholders={
+                    "body": "You're logged in and subscribed."
+                },
+            )
+
+        # Partner access is admin-managed — no self-serve subscribe link.
+        if entry.data.get("subscription_status") == SubscriptionStatus.PARTNER_TRIAL_EXPIRED.value:
+            return self.async_show_menu(
+                step_id="reconfigure",
+                menu_options={"reconfigure_logout": "Log out"},
+                description_placeholders={
+                    "body": "Your partner access has expired. Contact your account "
+                    "manager to restore access."
+                },
+            )
+
+        # UNSUBSCRIBED or EXPIRED (regular self-serve) — show the subscribe/resubscribe link.
+        action = "Resubscribe" if state is FlowState.EXPIRED else "Subscribe"
+        username = (entry.data.get("user") or {}).get("username", "Unknown")
+        account_line = f"**Account:** {username}\n\n"
+        url = await self._reconfigure_subscribe_url(entry)
+        if url:
+            body = (
+                f"{account_line}"
+                "You don't have an active subscription.\n\n"
+                f"[{action} to Ezlo Cloud HARC]({url})"
+            )
+        else:
+            body = (
+                f"{account_line}"
+                "You don't have an active subscription, and the subscribe link "
+                "could not be loaded right now. Please try again shortly."
+            )
+        return self.async_show_menu(
+            step_id="reconfigure",
+            menu_options={"reconfigure_logout": "Log out"},
+            description_placeholders={"body": body},
+        )
+
+    async def _reconfigure_subscribe_url(self, entry: EzloConfigEntry) -> str:
+        """Fetch the central subscribe URL for the reconfigure entry, or ''."""
+        user = entry.data.get("user") or {}
+        uuid = user.get("uuid")
+        if not uuid:
+            return ""
+        api_uri = entry.data.get(CONF_API_URI) or DEFAULT_API_URI
+        try:
+            status = await get_subscription_status(self.hass, uuid, api_uri=api_uri)
+        except EzloError:
+            return ""
+        return status.subscribe_url
+
+    async def async_step_reconfigure_login(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Log in and update the existing entry in place."""
         errors: dict[str, str] = {}
         login_error_detail = ""
 
         if user_input is not None:
-            username = user_input["username"]
-            password = user_input["password"]
+            entry = self._get_reconfigure_entry()
+            api_uri = entry.data.get(CONF_API_URI) or DEFAULT_API_URI
             system_uuid = await async_get_instance_id(self.hass) or ""
             try:
-                result = await authenticate(self.hass, username, password, system_uuid)
+                result = await authenticate(
+                    self.hass,
+                    user_input["username"],
+                    user_input["password"],
+                    system_uuid,
+                    api_uri=api_uri,
+                )
             except EzloAuthError as err:
                 error_key, login_error_detail = classify_login_error(str(err))
                 errors["base"] = error_key
@@ -236,13 +323,12 @@ class EzloHACloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
                 login_error_detail = str(err)
             else:
-                entry = self._get_reconfigure_entry()
                 return self.async_update_reload_and_abort(
                     entry, data_updates=dict(build_entry_data(result))
                 )
 
         return self.async_show_form(
-            step_id="reconfigure",
+            step_id="reconfigure_login",
             data_schema=vol.Schema(
                 {
                     vol.Required("username"): str,
@@ -251,6 +337,72 @@ class EzloHACloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
             description_placeholders={"error_detail": login_error_detail},
+        )
+
+    async def async_step_reconfigure_signup(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Create an account and update the existing entry in place."""
+        errors: dict[str, str] = {}
+        signup_error_detail = ""
+
+        if user_input is not None:
+            entry = self._get_reconfigure_entry()
+            api_uri = entry.data.get(CONF_API_URI) or DEFAULT_API_URI
+            system_uuid = await async_get_instance_id(self.hass) or ""
+            try:
+                result = await signup(
+                    self.hass,
+                    user_input["username"],
+                    user_input["email"],
+                    user_input["password"],
+                    system_uuid,
+                    api_uri=api_uri,
+                )
+            except EzloAuthError as err:
+                errors["base"] = "signup_failed"
+                signup_error_detail = str(err)
+            except EzloApiUnreachableError as err:
+                errors["base"] = "network_error"
+                signup_error_detail = str(err)
+            except EzloError as err:
+                errors["base"] = "signup_failed"
+                signup_error_detail = str(err)
+            else:
+                return self.async_update_reload_and_abort(
+                    entry, data_updates=dict(build_entry_data(result))
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure_signup",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("username"): str,
+                    vol.Required("email"): str,
+                    vol.Required("password"): str,
+                }
+            ),
+            errors=errors,
+            description_placeholders={"error_detail": signup_error_detail},
+        )
+
+    async def async_step_reconfigure_logout(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Clear credentials and reload (the entry idles logged-out)."""
+        entry = self._get_reconfigure_entry()
+        return self.async_update_reload_and_abort(
+            entry,
+            data_updates={
+                "is_logged_in": False,
+                "auth_token": None,
+                "tunnel_token": None,
+                "user": {},
+                "subscription_status": None,
+                "trial_ends_at": None,
+                "payment_required": False,
+            },
+            reason="logged_out",
         )
 
     @staticmethod

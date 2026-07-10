@@ -145,8 +145,9 @@ async def test_signup_success_creates_entry_with_payment_required(
 ) -> None:
     """Signup that returns payment_required still creates the entry.
 
-    is_logged_in is False so the options flow's resubscribe path can
-    surface the Stripe checkout.
+    Authentication succeeded, so is_logged_in is True (credentials saved);
+    payment_required stays True separately so setup idles the tunnel and the
+    options flow surfaces the subscribe link.
     """
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -169,7 +170,7 @@ async def test_signup_success_creates_entry_with_payment_required(
     data = result["data"]
     assert data["user"]["uuid"] == USER_UUID
     assert data["payment_required"] is True
-    assert data["is_logged_in"] is False
+    assert data["is_logged_in"] is True
 
 
 async def test_signup_failure_shows_backend_error(hass: HomeAssistant) -> None:
@@ -311,7 +312,7 @@ async def test_reauth_network_error_keeps_form(hass: HomeAssistant) -> None:
 async def test_reconfigure_network_error_keeps_form(
     hass: HomeAssistant,
 ) -> None:
-    """A network error during reconfigure stays on the form."""
+    """A network error during reconfigure login stays on the login form."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id=DOMAIN,
@@ -319,7 +320,15 @@ async def test_reconfigure_network_error_keeps_form(
     )
     entry.add_to_hass(hass)
 
+    # Dispatcher (logged-out) → choose Log in → credential form.
     result = await entry.start_reconfigure_flow(hass)
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "reconfigure"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "reconfigure_login"}
+    )
+    assert result["step_id"] == "reconfigure_login"
+
     with patch(
         "custom_components.ezlocloudharc.config_flow.authenticate",
         AsyncMock(side_effect=EzloApiUnreachableError("dns")),
@@ -331,7 +340,12 @@ async def test_reconfigure_network_error_keeps_form(
 
 
 async def test_reconfigure_flow_updates_entry(hass: HomeAssistant) -> None:
-    """A successful reconfigure swaps credentials in place."""
+    """A successful reconfigure login swaps credentials in place.
+
+    Uses a payment-required result so the reload triggered by
+    async_update_reload_and_abort idles (no frpc install) — we only care that
+    credentials are persisted and the flow aborts reconfigure_successful.
+    """
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id=DOMAIN,
@@ -340,12 +354,18 @@ async def test_reconfigure_flow_updates_entry(hass: HomeAssistant) -> None:
     entry.add_to_hass(hass)
 
     result = await entry.start_reconfigure_flow(hass)
-    assert result["type"] is FlowResultType.FORM
+    assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "reconfigure"
+    assert "reconfigure_login" in result["menu_options"]
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "reconfigure_login"}
+    )
+    assert result["step_id"] == "reconfigure_login"
 
     with patch(
         "custom_components.ezlocloudharc.config_flow.authenticate",
-        AsyncMock(return_value=_auth_result()),
+        AsyncMock(return_value=_auth_result(payment_required=True)),
     ):
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], {"username": "alice", "password": "pw"}
@@ -354,3 +374,4 @@ async def test_reconfigure_flow_updates_entry(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     assert entry.data["is_logged_in"] is True
+    assert entry.data["auth_token"].startswith("eyJ")
