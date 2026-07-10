@@ -17,3 +17,7 @@ jobs:
         uses: "hacs/action@main"
         with:
           category: "integration"
+          # This integration ships as a HACS *custom* repository, not the
+          # default store, so it is not registered in home-assistant/brands.
+          # Skip the brands gate to keep validation meaningful for our path.
+          ignore: "brands"
