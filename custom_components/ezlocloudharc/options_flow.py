@@ -6,7 +6,6 @@ import asyncio
 import logging
 import time
 from collections.abc import Mapping
-from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -38,6 +37,16 @@ from .exceptions import (
 )
 from .frp_helpers import fetch_and_update_frp_config, start_frpc, stop_frpc
 from .models import EzloConfigEntry, EzloRuntimeData
+from .utils import clear_trial_issues, compute_trial_days
+
+# Re-exported for callers/tests that import it from here.
+__all__ = [
+    "EzloOptionsFlowHandler",
+    "FlowState",
+    "compute_trial_days",
+    "entry_state",
+    "subscribe_prompt",
+]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -137,19 +146,6 @@ async def release_backend_binding(
         )
 
 
-def compute_trial_days(trial_ends_at: str | None) -> int | None:
-    """Compute remaining trial days from an ISO datetime string."""
-    if not trial_ends_at:
-        return None
-    try:
-        end_dt = datetime.fromisoformat(trial_ends_at.replace("Z", "+00:00"))
-    except (ValueError, TypeError):
-        return None
-    now = datetime.now(tz=end_dt.tzinfo)
-    remaining = (end_dt - now).days
-    return max(remaining, 0)
-
-
 class EzloOptionsFlowHandler(config_entries.OptionsFlow):
     """Handles the options flow (the cog) for Ezlo HA Cloud.
 
@@ -243,9 +239,8 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
             connected = runtime is not None and runtime.is_connected
             user_data = data.get("user", {}) or {}
             cloud_url = self._get_cloud_url() or "Not available"
-            status_line = _trial_text_for_status(
-                data.get("subscription_status", ""), data.get("trial_ends_at")
-            )
+            sub_status = data.get("subscription_status", "")
+            status_line = _trial_text_for_status(sub_status, data.get("trial_ends_at"))
             body = (
                 f"**Status:** {'Connected' if connected else 'Disconnected'}\n\n"
                 f"**Account:** {user_data.get('username', 'Unknown')}\n\n"
@@ -253,6 +248,15 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
             )
             if status_line:
                 body += f"\n\n{status_line}"
+            # On a free trial the user may subscribe early so access continues
+            # seamlessly — offer the central subscribe link when the backend has one.
+            if sub_status == SubscriptionStatus.TRIALING.value and user_data.get("uuid"):
+                status = await self._get_cached_subscription_status(user_data["uuid"])
+                url = (status.subscribe_url if status is not None else "") or data.get(
+                    "subscribe_url"
+                )
+                if url:
+                    body += f"\n\n[Subscribe now to keep remote access after your trial]({url})"
             return self.async_show_menu(
                 step_id="init",
                 menu_options=self._with_advanced({"logout": "Log out"}),
@@ -286,20 +290,20 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                 data.get("tunnel_token"),
                 dict(user_data),
             )
-        action = "Resubscribe" if state is FlowState.EXPIRED else "Subscribe"
+        action, lead = subscribe_prompt(state, sub_status, data.get("trial_ends_at"))
         account_line = f"**Account:** {user_data.get('username', 'Unknown')}\n\n"
         if url:
             body = (
                 f"{account_line}"
-                f"You don't have an active subscription.\n\n"
+                f"{lead}\n\n"
                 f"[{action} to Ezlo Cloud HARC]({url})\n\n"
                 "This page updates automatically once your subscription is confirmed."
             )
         else:
             body = (
                 f"{account_line}"
-                "You don't have an active subscription, and the subscribe link "
-                "could not be loaded right now. Please try again shortly."
+                f"{lead} The subscribe link could not be loaded right now. "
+                "Please try again shortly."
             )
         return self.async_show_menu(
             step_id="init",
@@ -354,6 +358,7 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
         self.hass.config_entries.async_update_entry(
             self._config_entry, data=_logged_out_data(self._config_entry.data)
         )
+        clear_trial_issues(self.hass)
         await stop_frpc(self.hass, self._config_entry)
         return self.async_abort(reason="logged_out")
 
@@ -485,6 +490,7 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                 "subscription_status": result.subscription_status,
                 "trial_ends_at": result.trial_ends_at,
                 "payment_required": True,
+                "subscribe_url": result.checkout_url,
             }
         )
         self.hass.config_entries.async_update_entry(self._config_entry, data=new_data)
@@ -501,6 +507,7 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                 "subscription_status": result.subscription_status,
                 "trial_ends_at": result.trial_ends_at,
                 "payment_required": False,
+                "subscribe_url": result.checkout_url,
             }
         )
         self.hass.config_entries.async_update_entry(self._config_entry, data=new_data)
@@ -579,7 +586,7 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                     is_trial=status.is_trial,
                     payment_required=False,
                     trial_ends_at=status.trial_ends_at or None,
-                    checkout_url=None,
+                    checkout_url=status.subscribe_url or None,
                 )
                 await self._handle_successful_login(synthetic)
                 return
@@ -643,9 +650,25 @@ def _logged_out_data(data: Mapping[str, Any]) -> dict[str, Any]:
             "subscription_status": None,
             "trial_ends_at": None,
             "payment_required": False,
+            "subscribe_url": None,
         }
     )
     return cleared
+
+
+def subscribe_prompt(
+    state: FlowState, sub_status: str | None, trial_ends_at: str | None
+) -> tuple[str, str]:
+    """Return the (link verb, lead sentence) for a self-serve unsubscribed screen.
+
+    A lapsed free trial is a first subscription, not a renewal: the user has
+    never paid, so the verb is "Subscribe" and the lead names the trial.
+    """
+    if sub_status == SubscriptionStatus.TRIAL_EXPIRED.value:
+        return "Subscribe", _trial_text_for_status(sub_status, trial_ends_at)
+    if state is FlowState.EXPIRED:
+        return "Resubscribe", "You don't have an active subscription."
+    return "Subscribe", "You don't have an active subscription."
 
 
 def _trial_text_for_status(sub_status: str | None, trial_ends_at: str | None) -> str:
@@ -657,12 +680,15 @@ def _trial_text_for_status(sub_status: str | None, trial_ends_at: str | None) ->
         if days is not None:
             return (
                 f"Free trial: {days} day{'s' if days != 1 else ''} remaining. "
-                "Your card will be charged automatically when the trial ends."
+                "No payment details are needed during the trial — subscribe before "
+                "it ends to keep remote access."
             )
         return (
-            "You are on a free trial. "
-            "Your card will be charged automatically when the trial ends."
+            "You are on a free trial. No payment details are needed during the "
+            "trial — subscribe before it ends to keep remote access."
         )
+    if sub_status == SubscriptionStatus.TRIAL_EXPIRED.value:
+        return "Your free trial has ended. Subscribe to restore remote access."
     if sub_status == SubscriptionStatus.INTERNAL.value:
         return "Internal user — unlimited access. No subscription required."
     if sub_status == SubscriptionStatus.PARTNER_TRIAL.value:

@@ -29,6 +29,10 @@ class EzloConfigData(TypedDict, total=False):
     subscription_status: str | None
     trial_ends_at: str | None
     payment_required: bool
+    # Central subscribe URL from the backend — present while payment is required
+    # and during a free trial (subscribe early). Feeds the repair issues' Learn
+    # more button. Redacted in diagnostics (embeds the account email).
+    subscribe_url: str | None
     server_name: str
     subdomain: str
     api_uri: str

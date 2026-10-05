@@ -26,7 +26,8 @@ home network to the internet.
 ## Requirements
 
 - Home Assistant 2024.10.0 or newer
-- An Ezlo Cloud HARC account — a free trial is available
+- An Ezlo Cloud HARC account — every new account starts with a free 3-month
+  trial, no payment details needed
   ([get started](https://www.ezlo.com/pages/home-assistant))
 - A Home Assistant host with outbound internet access
 
@@ -51,7 +52,7 @@ Add Integration → Ezlo Cloud HARC**.
 ## Getting started
 
 1. When you add the integration, choose **Log in** or **Create a new account**
-   (new accounts start a free trial).
+   (new accounts start a free 3-month trial — no card required).
 2. After you sign in, your secure tunnel is set up automatically.
 3. If prompted, add this small block to your `configuration.yaml` and restart
    — it lets Home Assistant trust the local connection:
@@ -81,10 +82,14 @@ Home Assistant address:
 
 Your subscription is managed right inside the integration options:
 
-- **Trial** — started automatically for new accounts.
-- **Paid** — upgrade anytime through secure Stripe checkout.
-- **Status** — check your current plan under **Subscription status**. If a
-  renewal is needed, the integration lets you know.
+- **Free trial** — every new account gets 3 months of remote access with no
+  payment details. The integration shows the days remaining under
+  **Configure**, and a Home Assistant **Repair** reminds you during the last
+  week of the trial.
+- **Paid** — subscribe anytime (during or after the trial) through the secure
+  Ezlo checkout linked from **Configure**; access continues seamlessly.
+- **Trial ended** — remote access pauses and a Repair prompts you to subscribe.
+  Once you do, the tunnel starts again automatically.
 
 ## Troubleshooting
 

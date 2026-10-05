@@ -57,6 +57,7 @@ def handler(
         (SubscriptionStatus.NONE.value, None, "don't have an active subscription"),
         (SubscriptionStatus.TRIALING.value, "2099-01-01T00:00:00Z", "free trial"),
         (SubscriptionStatus.TRIALING.value, None, "free trial"),
+        (SubscriptionStatus.TRIAL_EXPIRED.value, None, "free trial has ended"),
         (SubscriptionStatus.INTERNAL.value, None, "Internal user"),
         (SubscriptionStatus.PARTNER_TRIAL.value, "2099-01-01T00:00:00Z", "Partner trial"),
         (SubscriptionStatus.PARTNER_TRIAL.value, None, "Partner trial active"),
@@ -80,6 +81,14 @@ def test_trial_text_for_status(
         assert text == ""
     else:
         assert expected_phrase.lower() in text.lower()
+
+
+def test_trial_text_free_trial_never_mentions_a_card() -> None:
+    """The free trial collects no payment details, so no 'card will be charged'."""
+    for ends in ("2099-01-01T00:00:00Z", None):
+        text = _trial_text_for_status(SubscriptionStatus.TRIALING.value, ends).lower()
+        assert "card" not in text
+        assert "subscribe" in text
 
 
 # ── _get_abort_placeholders ─────────────────────────────────────────

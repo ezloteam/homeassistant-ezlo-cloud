@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ezlocloudharc import (
@@ -15,7 +16,11 @@ from custom_components.ezlocloudharc import (
     async_unload_entry,
     get_system_architecture,
 )
-from custom_components.ezlocloudharc.const import DOMAIN, SubscriptionStatus
+from custom_components.ezlocloudharc.const import (
+    DOMAIN,
+    ISSUE_TRIAL_EXPIRED,
+    SubscriptionStatus,
+)
 from custom_components.ezlocloudharc.exceptions import (
     EzloAuthError,
     EzloSubscriptionExpiredError,
@@ -214,6 +219,55 @@ async def test_setup_entry_subscription_expired_writes_canceled_and_idles(
     start_frpc.assert_not_awaited()
     assert entry.data["subscription_status"] == SubscriptionStatus.CANCELED.value
     assert entry.data["payment_required"] is True
+
+
+async def test_setup_entry_trial_expired_records_status_and_raises_repair(
+    hass: HomeAssistant,
+) -> None:
+    """A 402 carrying status=trial_expired is recorded as such — not as canceled —
+    and the trial_expired repair issue prompts the user to subscribe."""
+    entry = _entry(
+        subscription_status=SubscriptionStatus.TRIALING.value,
+        trial_ends_at="2026-01-01T00:00:00Z",
+        subscribe_url="https://ezlo.example/subscribe",
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.ezlocloudharc.get_system_architecture",
+            AsyncMock(return_value="amd64"),
+        ),
+        patch(
+            "custom_components.ezlocloudharc.install_frpc",
+            AsyncMock(return_value="/fake/bin/frpc"),
+        ),
+        patch(
+            "custom_components.ezlocloudharc.fetch_and_update_frp_config",
+            AsyncMock(
+                side_effect=EzloSubscriptionExpiredError(
+                    "trial over", status=SubscriptionStatus.TRIAL_EXPIRED.value
+                )
+            ),
+        ),
+        patch(
+            "custom_components.ezlocloudharc.is_trusted_proxy_configured",
+            return_value=True,
+        ),
+        patch(
+            "custom_components.ezlocloudharc.start_frpc", AsyncMock()
+        ) as start_frpc,
+    ):
+        result = await async_setup_entry(hass, entry)
+
+    assert result is True
+    start_frpc.assert_not_awaited()
+    assert entry.data["subscription_status"] == SubscriptionStatus.TRIAL_EXPIRED.value
+    assert entry.data["payment_required"] is True
+
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_TRIAL_EXPIRED)
+    assert issue is not None
+    assert issue.learn_more_url == "https://ezlo.example/subscribe"
 
 
 async def test_setup_entry_auth_error_raises_auth_failed(

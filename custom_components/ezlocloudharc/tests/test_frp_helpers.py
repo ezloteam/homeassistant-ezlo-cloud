@@ -131,6 +131,40 @@ async def test_fetch_and_update_frp_config_subscription_expired(
         await fetch_and_update_frp_config(hass, USER_UUID, API_TOKEN)
 
 
+async def test_fetch_and_update_frp_config_subscription_expired_carries_status(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    """The 402 body's ``status`` (e.g. trial_expired) rides along on the error.
+
+    Older backends send no status — that case is covered above and must leave
+    ``.status`` as None.
+    """
+    config_path = tmp_path / "config" / "frpc.toml"
+    session = _mock_aiohttp_session(
+        status=402,
+        json_data={
+            "error": "subscription_required",
+            "status": "trial_expired",
+            "subscribe_url": "https://ezlo.example/subscribe",
+        },
+    )
+
+    with (
+        patch(
+            "custom_components.ezlocloudharc.frp_helpers.get_frp_config_path",
+            return_value=config_path,
+        ),
+        patch(
+            "custom_components.ezlocloudharc.frp_helpers.async_get_clientsession",
+            return_value=session,
+        ),
+        pytest.raises(EzloSubscriptionExpiredError) as excinfo,
+    ):
+        await fetch_and_update_frp_config(hass, USER_UUID, API_TOKEN)
+
+    assert excinfo.value.status == "trial_expired"
+
+
 async def test_fetch_and_update_frp_config_other_http_error_unreachable(
     hass: HomeAssistant, tmp_path: Path
 ) -> None:

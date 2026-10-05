@@ -32,9 +32,19 @@ class EzloAuthError(EzloError):
 
 
 class EzloSubscriptionExpiredError(EzloError):
-    """The user's subscription is not in a valid state."""
+    """The user's subscription is not in a valid state.
+
+    ``status`` carries the backend's ``subscription_status`` from the 402 body
+    when it was present (``trial_expired``, ``none``, ``canceled``, ...) so the
+    caller can record the real state — a lapsed free trial must not be shown
+    as a cancelled subscription.
+    """
 
     translation_key = "subscription_expired"
+
+    def __init__(self, *args: object, status: str | None = None) -> None:
+        super().__init__(*args)
+        self.status = status
 
 
 class EzloMissingUUIDError(EzloError):

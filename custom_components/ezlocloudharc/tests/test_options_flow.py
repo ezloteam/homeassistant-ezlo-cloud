@@ -175,7 +175,12 @@ async def test_init_subscribed_shows_details_and_logout(
 
 @pytest.mark.parametrize(
     "status",
-    [SubscriptionStatus.NONE.value, SubscriptionStatus.PAST_DUE.value, SubscriptionStatus.CANCELED.value],
+    [
+        SubscriptionStatus.NONE.value,
+        SubscriptionStatus.TRIAL_EXPIRED.value,
+        SubscriptionStatus.PAST_DUE.value,
+        SubscriptionStatus.CANCELED.value,
+    ],
 )
 async def test_init_regular_unsubscribed_shows_subscribe_link(
     hass: HomeAssistant,
@@ -208,6 +213,14 @@ async def test_init_regular_unsubscribed_shows_subscribe_link(
     body = result["description_placeholders"]["body"]
     assert SUBSCRIBE_URL in body
     assert "alice" in body  # logged-in username is shown alongside the link
+    if status == SubscriptionStatus.TRIAL_EXPIRED.value:
+        # A lapsed trial is a first subscription: name the trial, never "Resubscribe".
+        assert "free trial has ended" in body.lower()
+        assert "[Subscribe to Ezlo Cloud HARC]" in body
+    elif status == SubscriptionStatus.NONE.value:
+        assert "[Subscribe to Ezlo Cloud HARC]" in body
+    else:
+        assert "[Resubscribe to Ezlo Cloud HARC]" in body
 
 
 async def test_init_partner_expired_shows_contact_manager(

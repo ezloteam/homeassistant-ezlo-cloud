@@ -19,7 +19,7 @@
       },
       "signup": {
         "title": "Create an Ezlo Cloud HARC Account",
-        "description": "Create a new Ezlo account. After signup you'll be asked to subscribe to enable remote access — if your account already has an active Ezlo subscription, access is enabled immediately.\n\n{error_detail}",
+        "description": "Create a new Ezlo account. New accounts include a free 3-month trial of remote access — no payment details needed. If your account already has an active Ezlo subscription, access is enabled immediately.\n\n{error_detail}",
         "data": {
           "username": "Username",
           "email": "Email",
@@ -48,7 +48,7 @@
       },
       "reconfigure_signup": {
         "title": "Create an Ezlo Cloud HARC Account",
-        "description": "Create a new Ezlo account. After signup you'll be asked to subscribe to enable remote access — if your account already has an active Ezlo subscription, access is enabled immediately.\n\n{error_detail}",
+        "description": "Create a new Ezlo account. New accounts include a free 3-month trial of remote access — no payment details needed. If your account already has an active Ezlo subscription, access is enabled immediately.\n\n{error_detail}",
         "data": {
           "username": "Username",
           "email": "Email",
@@ -95,7 +95,7 @@
       },
       "signup": {
         "title": "Create an Ezlo Cloud HARC Account",
-        "description": "Create a new Ezlo account. After signup you'll be asked to subscribe to enable remote access — if your account already has an active Ezlo subscription, access is enabled immediately.\n\n{error_detail}",
+        "description": "Create a new Ezlo account. New accounts include a free 3-month trial of remote access — no payment details needed. If your account already has an active Ezlo subscription, access is enabled immediately.\n\n{error_detail}",
         "data": {
           "username": "Username",
           "email": "Email",
@@ -107,7 +107,7 @@
       "login_successful": "You are now logged in to Ezlo Cloud HARC. Remote access is being configured.\n\n**Remote URL:** [{cloud_url}]({cloud_url})\n\n{trial_info}",
       "logged_out": "You have been logged out of Ezlo Cloud HARC. Remote access has been disabled.",
       "config_saved": "Configuration saved successfully.",
-      "signup_trial_started": "Welcome! Your account has been created and your subscription is active. Remote access is being configured.\n\n**Remote URL:** [{cloud_url}]({cloud_url})\n\n{trial_info}",
+      "signup_trial_started": "Welcome! Your account has been created. Remote access is being configured.\n\n**Remote URL:** [{cloud_url}]({cloud_url})\n\n{trial_info}",
       "advanced_disabled": "Advanced options are not enabled for this account."
     },
     "error": {
@@ -126,7 +126,7 @@
       "message": "Authentication with Ezlo Cloud HARC failed. Please log in again."
     },
     "subscription_expired": {
-      "message": "Your Ezlo Cloud HARC subscription has expired. Please resubscribe via the integration options."
+      "message": "Your Ezlo Cloud HARC access is not active (free trial ended or subscription lapsed). Please subscribe via the integration options."
     },
     "missing_uuid": {
       "message": "The Ezlo Cloud HARC token is missing a user identifier."
@@ -154,6 +154,14 @@
     "restart_required_for_trusted_proxies": {
       "title": "Add the trusted_proxies block to configuration.yaml",
       "description": "Ezlo Cloud HARC needs the Home Assistant HTTP component to trust the local frpc reverse proxy. Add the following block to your `configuration.yaml` and restart Home Assistant:\n\n```yaml\nhttp:\n  use_x_forwarded_for: true\n  trusted_proxies:\n    - 127.0.0.1\n```\n\nThis issue will close automatically the next time the integration loads and sees the block."
+    },
+    "trial_ending_soon": {
+      "title": "Your Ezlo Cloud HARC free trial ends in {days} day(s)",
+      "description": "Remote access through Ezlo Cloud HARC stops when your free trial ends. Subscribe before then to keep your remote URL working — use **Learn more**, or open the integration's **Configure** screen for the subscribe link. No payment details were collected during the trial.\n\nThis issue clears automatically once your subscription is active."
+    },
+    "trial_expired": {
+      "title": "Your Ezlo Cloud HARC free trial has ended",
+      "description": "Your free trial is over and remote access has been disabled. Subscribe to restore it — use **Learn more**, or open the integration's **Configure** screen for the subscribe link.\n\nThis issue clears automatically once your subscription is active."
     }
   }
 }

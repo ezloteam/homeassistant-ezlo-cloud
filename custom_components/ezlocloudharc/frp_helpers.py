@@ -62,7 +62,8 @@ async def fetch_and_update_frp_config(
     Returns a dict with `server_name` and `subdomain` for the first proxy.
 
     Raises:
-        EzloSubscriptionExpiredError: backend returned 402.
+        EzloSubscriptionExpiredError: backend returned 402 (``.status`` carries
+            the backend's subscription_status when the body included one).
         EzloApiUnreachableError: network failure.
         EzloApiUnexpectedResponseError: malformed payload.
     """
@@ -76,8 +77,19 @@ async def fetch_and_update_frp_config(
             headers={"Authorization": f"Bearer {token}"},
         ) as response:
             if response.status == 402:
+                # The gate's body names the real state (trial_expired / none /
+                # canceled) so the caller can word the prompt; tolerate bodies
+                # from older backends that carry no status.
+                status: str | None = None
+                try:
+                    body = await response.json()
+                except (aiohttp.ClientError, ValueError):
+                    body = None
+                if isinstance(body, dict) and isinstance(body.get("status"), str):
+                    status = body["status"]
                 raise EzloSubscriptionExpiredError(
-                    "Your subscription has expired. Please subscribe to continue."
+                    "Your subscription is not active. Please subscribe to continue.",
+                    status=status,
                 )
             # An expired/revoked token must trigger reauth, not an endless
             # ConfigEntryNotReady retry — surface it as an auth failure so

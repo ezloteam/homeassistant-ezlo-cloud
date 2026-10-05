@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from enum import StrEnum
 
 DOMAIN = "ezlocloudharc"
@@ -32,6 +33,20 @@ FRPC_SHA256: dict[str, str] = {
 # trusted_proxies block needed for remote access.
 ISSUE_TRUSTED_PROXIES_RESTART = "restart_required_for_trusted_proxies"
 
+# Repair issues that prompt the user about their free trial (see
+# utils.update_trial_issues). "Ending soon" is raised once TRIAL_ENDING_SOON_DAYS
+# or fewer remain; "expired" once the backend reports trial_expired. Both link
+# to the central subscribe flow via the issue's Learn more button.
+ISSUE_TRIAL_ENDING_SOON = "trial_ending_soon"
+ISSUE_TRIAL_EXPIRED = "trial_expired"
+TRIAL_ENDING_SOON_DAYS = 7
+
+# How often a loaded entry re-checks its subscription with the backend. This is
+# what lets a trial that lapses while Home Assistant is running stop the tunnel
+# and prompt for payment without waiting for a restart — and what auto-starts
+# the tunnel once an unsubscribed user completes checkout.
+SUBSCRIPTION_REFRESH_INTERVAL = timedelta(hours=6)
+
 
 class SubscriptionStatus(StrEnum):
     """Subscription state values from the Ezlo Cloud backend."""
@@ -39,8 +54,13 @@ class SubscriptionStatus(StrEnum):
     # Access granted by the central Ezlo subscription service's HARC feature
     # entitlement — the normal state for a subscribed regular user.
     FEATURE_HARC = "feature_harc"
-    # Legacy Stripe-managed states (kept until pre-central rows age out)
+    # Free trial running (no payment details collected). Managed by the HARC
+    # backend; ``trial_ends_at`` carries the end date.
     TRIALING = "trialing"
+    # Free trial over and no central subscription yet — remediation is the
+    # subscribe URL provided by the backend.
+    TRIAL_EXPIRED = "trial_expired"
+    # Legacy Stripe-managed states (kept until pre-central rows age out)
     ACTIVE = "active"
     PAST_DUE = "past_due"
     CANCELED = "canceled"
@@ -69,6 +89,7 @@ SUBSCRIPTION_VALID_STATES: frozenset[str] = frozenset(
 SUBSCRIPTION_INVALID_STATES: frozenset[str] = frozenset(
     {
         SubscriptionStatus.NONE,
+        SubscriptionStatus.TRIAL_EXPIRED,
         SubscriptionStatus.PAST_DUE,
         SubscriptionStatus.CANCELED,
         SubscriptionStatus.INCOMPLETE,

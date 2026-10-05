@@ -27,7 +27,9 @@ from .options_flow import (
     classify_signup_error,
     entry_state,
     release_backend_binding,
+    subscribe_prompt,
 )
+from .utils import clear_trial_issues
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,6 +57,7 @@ def build_entry_data(result: AuthResult) -> EzloConfigData:
         subscription_status=result.subscription_status,
         trial_ends_at=result.trial_ends_at,
         payment_required=result.payment_required,
+        subscribe_url=result.checkout_url,
     )
 
 
@@ -260,21 +263,19 @@ class EzloHACloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         # UNSUBSCRIBED or EXPIRED (regular self-serve) — show the subscribe/resubscribe link.
-        action = "Resubscribe" if state is FlowState.EXPIRED else "Subscribe"
+        action, lead = subscribe_prompt(
+            state, entry.data.get("subscription_status"), entry.data.get("trial_ends_at")
+        )
         username = (entry.data.get("user") or {}).get("username", "Unknown")
         account_line = f"**Account:** {username}\n\n"
         url = await self._reconfigure_subscribe_url(entry)
         if url:
-            body = (
-                f"{account_line}"
-                "You don't have an active subscription.\n\n"
-                f"[{action} to Ezlo Cloud HARC]({url})"
-            )
+            body = f"{account_line}{lead}\n\n[{action} to Ezlo Cloud HARC]({url})"
         else:
             body = (
                 f"{account_line}"
-                "You don't have an active subscription, and the subscribe link "
-                "could not be loaded right now. Please try again shortly."
+                f"{lead} The subscribe link could not be loaded right now. "
+                "Please try again shortly."
             )
         return self.async_show_menu(
             step_id="reconfigure",
@@ -398,6 +399,7 @@ class EzloHACloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await release_backend_binding(
             self.hass, entry.data, entry.data.get(CONF_API_URI) or DEFAULT_API_URI
         )
+        clear_trial_issues(self.hass)
         return self.async_update_reload_and_abort(
             entry,
             data_updates={
@@ -408,6 +410,7 @@ class EzloHACloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "subscription_status": None,
                 "trial_ends_at": None,
                 "payment_required": False,
+                "subscribe_url": None,
             },
             reason="logged_out",
         )

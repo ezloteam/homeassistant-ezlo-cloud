@@ -9,14 +9,17 @@ import platform
 import shutil
 import tarfile
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 import httpx
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.httpx_client import get_async_client
 
+from .api import get_subscription_status
 from .const import (
     CONF_API_URI,
     DEFAULT_API_URI,
@@ -24,6 +27,7 @@ from .const import (
     FRPC_SHA256,
     FRPC_VERSION,
     ISSUE_TRUSTED_PROXIES_RESTART,
+    SUBSCRIPTION_REFRESH_INTERVAL,
     SubscriptionStatus,
 )
 from .exceptions import (
@@ -41,7 +45,11 @@ from .frp_helpers import (
     stop_frpc,
 )
 from .models import EzloConfigEntry, EzloRuntimeData
-from .utils import is_trusted_proxy_configured
+from .utils import (
+    clear_trial_issues,
+    is_trusted_proxy_configured,
+    update_trial_issues,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,12 +86,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: EzloConfigEntry) -> bool
             "Ezlo Cloud HARC: no stored credentials; entry idle (log in via the "
             "integration options / reconfigure)"
         )
+        clear_trial_issues(hass)
         return True
 
     # Authenticated but not subscribed: load the entry successfully and idle —
     # credentials stay saved, no reauth prompt, and the tunnel is NOT started.
     # The user completes payment via the options flow (Configure), which reloads
-    # the entry on success so the subscribed path below starts the tunnel.
+    # the entry on success so the subscribed path below starts the tunnel. The
+    # periodic refresh below does the same automatically once the backend reports
+    # access again, and the repair issue prompts a user whose trial has ended.
     # NOTE: payment_required is NOT an auth failure — raising ConfigEntryAuthFailed
     # here is what previously forced the spurious re-authenticate prompt.
     if config.get("payment_required"):
@@ -92,6 +103,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: EzloConfigEntry) -> bool
             "tunnel not started (complete subscription via the integration options)",
             uuid,
         )
+        update_trial_issues(
+            hass,
+            config.get("subscription_status"),
+            config.get("trial_ends_at"),
+            config.get("subscribe_url"),
+        )
+        _schedule_subscription_refresh(hass, entry)
         return True
 
     # Surface the trusted_proxies requirement as a repair issue rather than
@@ -125,19 +143,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: EzloConfigEntry) -> bool
         )
     except EzloAuthError as err:
         raise ConfigEntryAuthFailed(str(err)) from err
-    except EzloSubscriptionExpiredError:
-        # Subscription lapsed at runtime (server-config returned 402). This is a
-        # subscription state, not an auth failure — record it and idle without a
-        # tunnel or a reauth prompt. The options flow surfaces resubscribe.
+    except EzloSubscriptionExpiredError as err:
+        # Access lapsed at runtime (server-config returned 402) — typically the
+        # free trial ran out while Home Assistant was off. This is a subscription
+        # state, not an auth failure — record the backend's real status (falling
+        # back to "canceled" for older backends) and idle without a tunnel or a
+        # reauth prompt. The repair issue + options flow surface the subscribe link.
+        status = err.status or SubscriptionStatus.CANCELED.value
         new_data = dict(entry.data)
-        new_data["subscription_status"] = SubscriptionStatus.CANCELED.value
+        new_data["subscription_status"] = status
         new_data["payment_required"] = True
         hass.config_entries.async_update_entry(entry, data=new_data)
         _LOGGER.info(
-            "Ezlo Cloud HARC: subscription for user %s is no longer active; "
-            "tunnel not started (resubscribe via the integration options)",
+            "Ezlo Cloud HARC: access for user %s is no longer active (%s); "
+            "tunnel not started (subscribe via the integration options)",
             uuid,
+            status,
         )
+        update_trial_issues(
+            hass, status, new_data.get("trial_ends_at"), new_data.get("subscribe_url")
+        )
+        _schedule_subscription_refresh(hass, entry)
         return True
     except EzloError as err:
         raise ConfigEntryNotReady(str(err)) from err
@@ -155,7 +181,81 @@ async def async_setup_entry(hass: HomeAssistant, entry: EzloConfigEntry) -> bool
         raise ConfigEntryNotReady(str(err)) from err
 
     entry.async_on_unload(_make_stop_listener(hass, entry))
+
+    # Trial countdown prompt (if the trial is ending soon) and the periodic
+    # re-check that turns a lapsed trial into a stopped tunnel + payment prompt.
+    update_trial_issues(
+        hass,
+        new_data.get("subscription_status"),
+        new_data.get("trial_ends_at"),
+        new_data.get("subscribe_url"),
+    )
+    _schedule_subscription_refresh(hass, entry)
     return True
+
+
+def _schedule_subscription_refresh(hass: HomeAssistant, entry: EzloConfigEntry) -> None:
+    """Re-check the subscription every SUBSCRIPTION_REFRESH_INTERVAL while loaded.
+
+    The listener is tied to the entry's lifetime via ``async_on_unload`` so a
+    reload or unload always stops it.
+    """
+
+    async def _tick(_now: datetime) -> None:
+        await async_refresh_subscription(hass, entry)
+
+    entry.async_on_unload(
+        async_track_time_interval(hass, _tick, SUBSCRIPTION_REFRESH_INTERVAL)
+    )
+
+
+async def async_refresh_subscription(hass: HomeAssistant, entry: EzloConfigEntry) -> None:
+    """Pull the live subscription state and react to changes.
+
+    - Updates the stored status / trial end / subscribe URL and the trial repair
+      issues (the "ending soon" countdown, the "expired" prompt).
+    - When access flips (trial lapsed → payment required, or checkout completed →
+      access granted) the entry is reloaded so the tunnel stops or starts.
+
+    Backend errors are logged at debug level and retried on the next tick; an
+    unreachable backend must never tear down a working tunnel.
+    """
+    data = entry.data
+    user = data.get("user") or {}
+    uuid = user.get("uuid")
+    token = data.get("auth_token")
+    if not uuid or not token:
+        return
+    api_uri = data.get(CONF_API_URI) or DEFAULT_API_URI
+
+    try:
+        status = await get_subscription_status(
+            hass, uuid, auth_token=token, api_uri=api_uri
+        )
+    except EzloError as err:
+        _LOGGER.debug("Ezlo Cloud HARC: subscription refresh skipped: %s", err)
+        return
+
+    payment_required = not status.is_active
+    updates = {
+        "subscription_status": status.status,
+        "trial_ends_at": status.trial_ends_at or None,
+        "payment_required": payment_required,
+        "subscribe_url": status.subscribe_url or None,
+    }
+    if any(data.get(key) != value for key, value in updates.items()):
+        hass.config_entries.async_update_entry(entry, data={**data, **updates})
+
+    update_trial_issues(hass, status.status, status.trial_ends_at, status.subscribe_url)
+
+    if payment_required != bool(data.get("payment_required")):
+        _LOGGER.info(
+            "Ezlo Cloud HARC: access for user %s changed (%s); reloading to %s the tunnel",
+            uuid,
+            status.status,
+            "stop" if payment_required else "start",
+        )
+        hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
 
 
 def _make_stop_listener(
@@ -296,6 +396,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: EzloConfigEntry) -> boo
 
 __all__ = [
     "ARCH_MAP",
+    "async_refresh_subscription",
     "async_setup_entry",
     "async_unload_entry",
     "check_binary_current",
