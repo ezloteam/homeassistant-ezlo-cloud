@@ -15,18 +15,21 @@ DEFAULT_API_URI = "https://api.harc.cloud"
 CONF_API_URI = "api_uri"
 
 # FRPC binary version installed and managed by this integration.
-FRPC_VERSION = "0.61.0"
+FRPC_VERSION = "0.71.0"
 
 # SHA-256 hashes of the upstream frpc release tarballs for FRPC_VERSION,
 # keyed by the architecture string used in the GitHub download URL
 # (frp_<ver>_linux_<arch>.tar.gz). Hardcoding these pins the download to a
 # bit-identical artifact, defending against a compromised GitHub release.
-# Source: https://github.com/fatedier/frp/releases/download/v0.61.0/frp_sha256_checksums.txt
+# Source: https://github.com/fatedier/frp/releases/download/v0.71.0/frp_sha256_checksums.txt
+#
+# Bumping: frps (frp-ezlo-plugin) must be upgraded first. frp's compatibility
+# policy (since 0.69.0) supports frpc <-> frps within eight minor versions.
 FRPC_SHA256: dict[str, str] = {
-    "amd64": "720a9fe2a3299346572544909a78c023344c88bde13c55b921e298e8c5ded21f",
-    "arm64": "8d54b8faae5df02268bd784f78a155494893c6eb00070a185022198c1997ec7f",
-    "arm": "38b2d2f9a46b636dcdf4d656373de86f6c869da98a4e323bd9587989c1c06db0",
-    "arm_hf": "f151b5087870a72faa13c026336f3a6b97f0df2dcae3f3b122c43e604772cd23",
+    "amd64": "84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716",
+    "arm64": "f33c293c275d8fc68c654b6fba8f10b2551d6463d09a9fc9cffb7227eae82266",
+    "arm": "f40a984f83e8d34a9241b0be4a9d5fbcfe513a4a5c022b84a02637ff6d36833b",
+    "arm_hf": "eab1ecb45b00e2f9cf2ebc458fde570ceecb50689c4c5c728677f44825bf3d88",
 }
 
 # Repair-issue identifier surfaced when configuration.yaml lacks the

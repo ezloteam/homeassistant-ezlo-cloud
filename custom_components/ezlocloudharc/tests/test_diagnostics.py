@@ -100,9 +100,9 @@ async def test_read_binary_version_reads_version_string(tmp_path: Path) -> None:
     binary = tmp_path / "frpc"
     binary.write_bytes(b"")
     proc = AsyncMock()
-    proc.communicate = AsyncMock(return_value=(b"frpc v0.61.0\n", b""))
+    proc.communicate = AsyncMock(return_value=(b"frpc v0.71.0\n", b""))
     with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
-        assert await _read_binary_version(binary) == "frpc v0.61.0"
+        assert await _read_binary_version(binary) == "frpc v0.71.0"
 
 
 async def test_read_binary_version_oserror_returns_none(tmp_path: Path) -> None:

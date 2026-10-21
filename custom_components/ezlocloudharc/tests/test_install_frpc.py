@@ -23,7 +23,7 @@ from custom_components.ezlocloudharc.exceptions import (
     FrpcInstallError,
 )
 
-VERSION = "0.61.0"
+VERSION = "0.71.0"
 MACHINE = "amd64"
 
 
@@ -38,7 +38,7 @@ def _build_tarball(*, include_frpc: bool = True) -> bytes:
         tar.addfile(readme_info, io.BytesIO(readme))
 
         if include_frpc:
-            frpc_bin = b"#!/bin/sh\necho frpc v0.61.0\n"
+            frpc_bin = b"#!/bin/sh\necho frpc v0.71.0\n"
             frpc_info = tarfile.TarInfo(name=f"{folder}/frpc")
             frpc_info.size = len(frpc_bin)
             frpc_info.mode = 0o755
