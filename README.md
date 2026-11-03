@@ -78,6 +78,24 @@ Home Assistant address:
   notifications and remote control work on the go.
 - Share access with a family member through their own Ezlo account.
 
+## Ezlo app
+
+After you sign in, the integration asks **"Allow Ezlo to show and control your
+devices?"** If you allow it, your Home Assistant is added to your Ezlo app
+automatically, with no token to copy:
+
+- You choose which of your properties this Home Assistant joins, or add a new
+  one. For a new property you enter its address; the name, country and time
+  zone are filled in from your Home Assistant settings.
+- Home Assistant creates an administrator user named **Ezlo** and an access
+  token that only the Ezlo app holds. Your password is used once to sign in to
+  the Ezlo app and is not stored.
+- To connect later, or to reconnect, open **Configure** → **Connect Ezlo app**
+  and enter your password.
+- To revoke access, open **Configure** → **Disconnect Ezlo app**, or
+  deactivate the **Ezlo** user in **Settings → People**. Removing the
+  integration also revokes it.
+
 ## Subscription
 
 Your subscription is managed right inside the integration options:

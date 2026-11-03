@@ -38,6 +38,7 @@ from .exceptions import (
     FrpcInstallError,
     FrpcUnsupportedArchitectureError,
 )
+from .ezlo_app import async_disconnect as async_disconnect_ezlo_app
 from .frp_helpers import (
     fetch_and_update_frp_config,
     get_frp_binary_path,
@@ -394,9 +395,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: EzloConfigEntry) -> boo
     return True
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: EzloConfigEntry) -> None:
+    """Revoke the Ezlo app's access along with the integration that granted it."""
+    await async_disconnect_ezlo_app(hass, entry.data.get("ezlo_app"))
+
+
 __all__ = [
     "ARCH_MAP",
     "async_refresh_subscription",
+    "async_remove_entry",
     "async_setup_entry",
     "async_unload_entry",
     "check_binary_current",

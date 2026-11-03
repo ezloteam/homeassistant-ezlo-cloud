@@ -14,6 +14,12 @@ PLATFORMS: list[str] = []
 DEFAULT_API_URI = "https://api.harc.cloud"
 CONF_API_URI = "api_uri"
 
+# Ezlo property platform (the "Ezlo app") the hub is registered in when the user
+# allows it — see ezlo_app.py. Overridable per-entry like CONF_API_URI so QA can
+# target a non-production platform.
+DEFAULT_PROPERTY_URI = "https://property.ezlo.com"
+CONF_PROPERTY_URI = "property_uri"
+
 # FRPC binary version installed and managed by this integration.
 FRPC_VERSION = "0.71.0"
 

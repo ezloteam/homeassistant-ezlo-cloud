@@ -97,9 +97,17 @@ async def test_login_success_creates_entry(hass: HomeAssistant) -> None:
             result["flow_id"], {"username": "alice", "password": "pw"}
         )
 
+    # A user with access is asked about the Ezlo app before the entry exists.
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "ezlo_app"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "ezlo_app_skip"}
+    )
+
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Ezlo Cloud HARC"
     data = result["data"]
+    assert "ezlo_app" not in data
     assert data["user"]["uuid"] == USER_UUID
     assert data["user"]["username"] == "alice"
     assert data["is_logged_in"] is True

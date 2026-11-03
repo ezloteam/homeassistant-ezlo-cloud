@@ -71,6 +71,19 @@ class EzloApiUnexpectedResponseError(EzloError):
         super().__init__(detail, translation_placeholders={"detail": detail})
 
 
+class EzloAppError(EzloError):
+    """Connecting this Home Assistant to the Ezlo app failed."""
+
+    translation_key = "ezlo_app_failed"
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail, translation_placeholders={"detail": detail})
+
+
+class EzloAppAuthError(EzloAppError):
+    """The Ezlo app rejected the user's credentials."""
+
+
 class FrpcInstallError(EzloError):
     """Installing the FRPC binary failed."""
 

@@ -54,6 +54,35 @@
           "email": "[%key:common::config_flow::data::email%]",
           "password": "[%key:common::config_flow::data::password%]"
         }
+      },
+      "ezlo_app": {
+        "title": "Connect the Ezlo app",
+        "description": "Allow Ezlo to show and control your devices?\n\nThe Ezlo app will reach your Home Assistant through your remote access address. To do that, Home Assistant creates an administrator user named **Ezlo** with an access token that only the Ezlo app holds. Your password is used once to sign in to the Ezlo app and is not stored.\n\nYou can revoke access at any time with **Disconnect Ezlo app** in this integration's options, or by deactivating the Ezlo user in Settings → People.\n\n{error_detail}",
+        "menu_options": {
+          "ezlo_app_allow": "Yes, allow Ezlo",
+          "ezlo_app_skip": "Not now"
+        }
+      },
+      "ezlo_app_property": {
+        "title": "Choose a property",
+        "description": "Which property should this Home Assistant be added to in the Ezlo app?\n\n{error_detail}",
+        "data": {
+          "property": "Property"
+        }
+      },
+      "ezlo_app_new_property": {
+        "title": "Add a property",
+        "description": "Enter the details of the property this Home Assistant is in. What Home Assistant already knows is filled in; check it before continuing.\n\n{error_detail}",
+        "data": {
+          "property_name": "Property name",
+          "street_address": "Street address",
+          "additional_street_address": "Apartment, suite, unit (optional)",
+          "city": "City",
+          "state": "State / province",
+          "zipcode": "ZIP / postal code",
+          "country": "Country",
+          "time_zone": "Time zone"
+        }
       }
     },
     "abort": {
@@ -79,10 +108,11 @@
         "description": "{body}"
       },
       "advanced": {
-        "title": "Advanced — API endpoint",
-        "description": "Override the Ezlo Cloud HARC API endpoint.\n\nCurrent: `{current_api_uri}`\nDefault: `{default_api_uri}`\n\nClear the field to revert to the default.",
+        "title": "Advanced — endpoints",
+        "description": "Override the Ezlo Cloud HARC API endpoint and the Ezlo app (property platform) address.\n\nCurrent API: `{current_api_uri}`\nDefault API: `{default_api_uri}`\nDefault Ezlo app: `{default_property_uri}`\n\nClear a field to revert to its default.",
         "data": {
-          "api_uri": "API endpoint URL"
+          "api_uri": "API endpoint URL",
+          "property_uri": "Ezlo app URL"
         }
       },
       "login": {
@@ -101,6 +131,42 @@
           "email": "[%key:common::config_flow::data::email%]",
           "password": "[%key:common::config_flow::data::password%]"
         }
+      },
+      "ezlo_app": {
+        "title": "Connect the Ezlo app",
+        "description": "Allow Ezlo to show and control your devices?\n\nThe Ezlo app will reach your Home Assistant through your remote access address. To do that, Home Assistant creates an administrator user named **Ezlo** with an access token that only the Ezlo app holds. Your password is used once to sign in to the Ezlo app and is not stored.\n\nYou can revoke access at any time with **Disconnect Ezlo app** in this integration's options, or by deactivating the Ezlo user in Settings → People.\n\nEnter the password for **{username}** to continue.\n\n{error_detail}",
+        "data": {
+          "password": "[%key:common::config_flow::data::password%]"
+        }
+      },
+      "ezlo_app_offer": {
+        "title": "Connect the Ezlo app",
+        "description": "You're logged in. Remote access is being configured.\n\n**Remote URL:** [{cloud_url}]({cloud_url})\n\n{trial_info}\n\nAllow Ezlo to show and control your devices?\n\nThe Ezlo app will reach your Home Assistant through your remote access address. To do that, Home Assistant creates an administrator user named **Ezlo** with an access token that only the Ezlo app holds. Your password is used once to sign in to the Ezlo app and is not stored.\n\nYou can revoke access at any time with **Disconnect Ezlo app** in this integration's options, or by deactivating the Ezlo user in Settings → People.\n\n{error_detail}",
+        "menu_options": {
+          "ezlo_app_offer_allow": "Yes, allow Ezlo",
+          "ezlo_app_offer_skip": "Not now"
+        }
+      },
+      "ezlo_app_property": {
+        "title": "Choose a property",
+        "description": "Which property should this Home Assistant be added to in the Ezlo app?\n\n{error_detail}",
+        "data": {
+          "property": "Property"
+        }
+      },
+      "ezlo_app_new_property": {
+        "title": "Add a property",
+        "description": "Enter the details of the property this Home Assistant is in. What Home Assistant already knows is filled in; check it before continuing.\n\n{error_detail}",
+        "data": {
+          "property_name": "Property name",
+          "street_address": "Street address",
+          "additional_street_address": "Apartment, suite, unit (optional)",
+          "city": "City",
+          "state": "State / province",
+          "zipcode": "ZIP / postal code",
+          "country": "Country",
+          "time_zone": "Time zone"
+        }
       }
     },
     "abort": {
@@ -108,14 +174,17 @@
       "logged_out": "You have been logged out of Ezlo Cloud HARC. Remote access has been disabled.",
       "config_saved": "Configuration saved successfully.",
       "signup_trial_started": "Welcome! Your account has been created. Remote access is being configured.\n\n**Remote URL:** [{cloud_url}]({cloud_url})\n\n{trial_info}",
-      "advanced_disabled": "Advanced options are not enabled for this account."
+      "advanced_disabled": "Advanced options are not enabled for this account.",
+      "ezlo_app_connected": "The Ezlo app is connected. Your devices will appear in the Ezlo app shortly.",
+      "ezlo_app_disconnected": "The Ezlo app is disconnected and its access token has been revoked. The hub still shows in the Ezlo app as offline; you can remove it there."
     },
     "error": {
       "invalid_credentials": "Invalid username or password. Please try again.",
       "device_already_bound": "This Home Assistant installation is already linked to a different Ezlo Cloud HARC account. Sign out from the other account, or contact support to release the binding.",
       "signup_failed": "Account creation failed. Please try again.",
       "network_error": "Unable to reach Ezlo Cloud HARC. Please check your internet connection.",
-      "unknown": "An unexpected error occurred. Please try again."
+      "unknown": "An unexpected error occurred. Please try again.",
+      "ezlo_app_failed": "Could not connect the Ezlo app."
     }
   },
   "exceptions": {
@@ -148,6 +217,9 @@
     },
     "api_unexpected_response": {
       "message": "Ezlo Cloud HARC API returned an unexpected response: {detail}"
+    },
+    "ezlo_app_failed": {
+      "message": "Could not connect the Ezlo app: {detail}"
     }
   },
   "issues": {

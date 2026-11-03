@@ -328,6 +328,11 @@ async def test_login_success_aborts_login_successful(
     ):
         result = await handler.async_step_login({"username": "u", "password": "p"})
 
+    # The Ezlo app question comes first; skipping it closes as before.
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "ezlo_app_offer"
+    result = await handler.async_step_ezlo_app_offer_skip()
+
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "login_successful"
     assert configured_entry.data["auth_token"].startswith("eyJ")

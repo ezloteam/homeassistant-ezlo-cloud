@@ -25,7 +25,9 @@ from .api import (
 )
 from .const import (
     CONF_API_URI,
+    CONF_PROPERTY_URI,
     DEFAULT_API_URI,
+    DEFAULT_PROPERTY_URI,
     SUBSCRIPTION_INVALID_STATES,
     SUBSCRIPTION_VALID_STATES,
     SubscriptionStatus,
@@ -35,8 +37,10 @@ from .exceptions import (
     EzloAuthError,
     EzloError,
 )
+from .ezlo_app import async_disconnect as async_disconnect_ezlo_app
+from .ezlo_app_flow import BAD_CREDENTIALS, EzloAppFlowMixin
 from .frp_helpers import fetch_and_update_frp_config, start_frpc, stop_frpc
-from .models import EzloConfigEntry, EzloRuntimeData
+from .models import EzloAppData, EzloConfigEntry, EzloRuntimeData
 from .utils import clear_trial_issues, compute_trial_days
 
 # Re-exported for callers/tests that import it from here.
@@ -146,7 +150,7 @@ async def release_backend_binding(
         )
 
 
-class EzloOptionsFlowHandler(config_entries.OptionsFlow):
+class EzloOptionsFlowHandler(EzloAppFlowMixin, config_entries.OptionsFlow):
     """Handles the options flow (the cog) for Ezlo HA Cloud.
 
     A single flat screen driven by ``entry_state``: logged-out shows login /
@@ -157,6 +161,9 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
     def __init__(self, config_entry: EzloConfigEntry) -> None:
         """Initialize options flow."""
         self._config_entry: EzloConfigEntry = config_entry
+        # Set when a login/signup leads to the Ezlo app question. The password
+        # (in _ezlo_credentials) only lives as long as this flow.
+        self._login_reason = ""
 
     # ── Helpers ──────────────────────────────────────────────────
 
@@ -192,6 +199,19 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
         """Return the API URI for the current config entry."""
         api_uri = self._config_entry.data.get(CONF_API_URI) or DEFAULT_API_URI
         return str(api_uri)
+
+    def _get_property_uri(self) -> str:
+        """Return the Ezlo app (property platform) URI for this entry."""
+        return str(self._config_entry.data.get(CONF_PROPERTY_URI) or DEFAULT_PROPERTY_URI)
+
+    def _ezlo_app_menu(self) -> dict[str, str]:
+        """Menu entries for connecting or disconnecting the Ezlo app."""
+        if self._config_entry.data.get("ezlo_app"):
+            return {
+                "ezlo_app": "Reconnect Ezlo app",
+                "ezlo_app_disconnect": "Disconnect Ezlo app",
+            }
+        return {"ezlo_app": "Connect Ezlo app"}
 
     def _with_advanced(self, menu_options: dict[str, str]) -> dict[str, str]:
         """Append the advanced entry to a menu when advanced options are on."""
@@ -241,10 +261,12 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
             cloud_url = self._get_cloud_url() or "Not available"
             sub_status = data.get("subscription_status", "")
             status_line = _trial_text_for_status(sub_status, data.get("trial_ends_at"))
+            ezlo_app = _ezlo_app_status(data.get("ezlo_app"))
             body = (
                 f"**Status:** {'Connected' if connected else 'Disconnected'}\n\n"
                 f"**Account:** {user_data.get('username', 'Unknown')}\n\n"
-                f"**Remote URL:** [{cloud_url}]({cloud_url})"
+                f"**Remote URL:** [{cloud_url}]({cloud_url})\n\n"
+                f"**Ezlo app:** {ezlo_app}"
             )
             if status_line:
                 body += f"\n\n{status_line}"
@@ -259,7 +281,9 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                     body += f"\n\n[Subscribe now to keep remote access after your trial]({url})"
             return self.async_show_menu(
                 step_id="init",
-                menu_options=self._with_advanced({"logout": "Log out"}),
+                menu_options=self._with_advanced(
+                    {**self._ezlo_app_menu(), "logout": "Log out"}
+                ),
                 description_placeholders={"body": body},
             )
 
@@ -321,12 +345,18 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_abort(reason="advanced_disabled")
 
         if user_input is not None:
-            api_uri = (user_input.get(CONF_API_URI) or "").strip()
             new_data = dict(self._config_entry.data)
-            if api_uri:
-                new_data[CONF_API_URI] = api_uri
-            else:
-                new_data.pop(CONF_API_URI, None)
+            # A field left at its default is not an override, so a later change
+            # of default still reaches this entry.
+            for key, default in (
+                (CONF_API_URI, DEFAULT_API_URI),
+                (CONF_PROPERTY_URI, DEFAULT_PROPERTY_URI),
+            ):
+                value = (user_input.get(key) or "").strip()
+                if value and value != default:
+                    new_data[key] = value
+                else:
+                    new_data.pop(key, None)
             self.hass.config_entries.async_update_entry(
                 self._config_entry, data=new_data
             )
@@ -338,13 +368,133 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
             data_schema=vol.Schema(
                 {
                     vol.Optional(CONF_API_URI, default=current): str,
+                    vol.Optional(
+                        CONF_PROPERTY_URI, default=self._get_property_uri()
+                    ): str,
                 }
             ),
             description_placeholders={
                 "current_api_uri": current,
                 "default_api_uri": DEFAULT_API_URI,
+                "default_property_uri": DEFAULT_PROPERTY_URI,
             },
         )
+
+    # ── Ezlo app (HARC-20) ───────────────────────────────────────
+
+    async def async_step_ezlo_app(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Connect (or reconnect) the Ezlo app; needs the password again."""
+        if user_input is None:
+            return self._async_show_password_form("")
+        self._ezlo_ha_url = self._get_cloud_url()
+        if not self._ezlo_ha_url:
+            return self._async_show_password_form(
+                "Could not connect the Ezlo app: your remote access address is not ready yet"
+            )
+        username = (self._config_entry.data.get("user") or {}).get("username", "")
+        self._ezlo_credentials = (username, user_input["password"])
+        return await self._async_ezlo_app_choose()
+
+    def _async_show_password_form(self, error: str) -> config_entries.ConfigFlowResult:
+        """Ask for the Ezlo password, showing why the last attempt failed."""
+        errors: dict[str, str] = {}
+        detail = ""
+        if error == BAD_CREDENTIALS:
+            errors["base"] = "invalid_credentials"
+        elif error:
+            errors["base"] = "ezlo_app_failed"
+            detail = error
+        return self.async_show_form(
+            step_id="ezlo_app",
+            data_schema=vol.Schema({vol.Required("password"): str}),
+            errors=errors,
+            description_placeholders={
+                "username": (self._config_entry.data.get("user") or {}).get("username", ""),
+                "error_detail": detail,
+            },
+        )
+
+    async def async_step_ezlo_app_disconnect(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Revoke the Ezlo app's access by removing the "Ezlo" user."""
+        data = dict(self._config_entry.data)
+        await async_disconnect_ezlo_app(self.hass, data.pop("ezlo_app", None))
+        self.hass.config_entries.async_update_entry(self._config_entry, data=data)
+        return self.async_abort(reason="ezlo_app_disconnected")
+
+    async def _async_offer_ezlo_app(
+        self, username: str, password: str, reason: str
+    ) -> config_entries.ConfigFlowResult:
+        """After a login with access, ask about the Ezlo app before closing.
+
+        Without a remote URL (server-config failed) there is nothing to
+        register, so the flow closes as before.
+        """
+        if not self._get_cloud_url():
+            return self.async_abort(
+                reason=reason, description_placeholders=self._get_abort_placeholders()
+            )
+        self._ezlo_credentials = (username, password)
+        self._login_reason = reason
+        return await self.async_step_ezlo_app_offer()
+
+    async def async_step_ezlo_app_offer(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Ask: allow Ezlo to show and control your devices?"""
+        return self.async_show_menu(
+            step_id="ezlo_app_offer",
+            menu_options=["ezlo_app_offer_allow", "ezlo_app_offer_skip"],
+            description_placeholders={
+                **self._get_abort_placeholders(),
+                "error_detail": self._ezlo_error,
+            },
+        )
+
+    async def async_step_ezlo_app_offer_allow(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Use the credentials typed in the login/signup step."""
+        self._ezlo_ha_url = self._get_cloud_url()
+        return await self._async_ezlo_app_choose()
+
+    async def async_step_ezlo_app_offer_skip(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Close with the usual login message; the Ezlo app can be connected later."""
+        self._ezlo_credentials = None
+        return self.async_abort(
+            reason=self._login_reason,
+            description_placeholders=self._get_abort_placeholders(),
+        )
+
+    # Hooks for EzloAppFlowMixin.
+
+    def _ezlo_app_property_uri(self) -> str:
+        return self._get_property_uri()
+
+    def _ezlo_app_previous(self) -> EzloAppData | None:
+        previous: EzloAppData | None = self._config_entry.data.get("ezlo_app")
+        return previous
+
+    async def _async_ezlo_app_connected(
+        self, ezlo_app: EzloAppData
+    ) -> config_entries.ConfigFlowResult:
+        self.hass.config_entries.async_update_entry(
+            self._config_entry, data={**self._config_entry.data, "ezlo_app": ezlo_app}
+        )
+        return self.async_abort(reason="ezlo_app_connected")
+
+    async def _async_ezlo_app_back(self, error: str) -> config_entries.ConfigFlowResult:
+        # Back to whichever question led here: the one after a login, or the
+        # password form of Connect Ezlo app.
+        if self._login_reason:
+            self._ezlo_error = error
+            return await self.async_step_ezlo_app_offer()
+        return self._async_show_password_form(error)
 
     # ── Logout ───────────────────────────────────────────────────
 
@@ -355,8 +505,9 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
         await release_backend_binding(
             self.hass, self._config_entry.data, self._get_api_uri()
         )
+        await async_disconnect_ezlo_app(self.hass, self._config_entry.data.get("ezlo_app"))
         self.hass.config_entries.async_update_entry(
-            self._config_entry, data=_logged_out_data(self._config_entry.data)
+            self._config_entry, data=logged_out_data(self._config_entry.data)
         )
         clear_trial_issues(self.hass)
         await stop_frpc(self.hass, self._config_entry)
@@ -399,9 +550,8 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
                     return await self.async_step_init()
 
                 await self._handle_successful_login(result)
-                return self.async_abort(
-                    reason="login_successful",
-                    description_placeholders=self._get_abort_placeholders(),
+                return await self._async_offer_ezlo_app(
+                    username, password, "login_successful"
                 )
 
         return self.async_show_form(
@@ -451,9 +601,8 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
             else:
                 if not result.payment_required:
                     await self._handle_successful_login(result)
-                    return self.async_abort(
-                        reason="signup_trial_started",
-                        description_placeholders=self._get_abort_placeholders(),
+                    return await self._async_offer_ezlo_app(
+                        username, password, "signup_trial_started"
                     )
 
                 self._persist_unsubscribed(result)
@@ -638,9 +787,14 @@ class EzloOptionsFlowHandler(config_entries.OptionsFlow):
 # ── Module-private helpers ────────────────────────────────────────
 
 
-def _logged_out_data(data: Mapping[str, Any]) -> dict[str, Any]:
-    """Return a copy of entry data with all auth/subscription fields cleared."""
+def logged_out_data(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a copy of entry data with all auth/subscription fields cleared.
+
+    The Ezlo app connection goes too: it was made for this account and its
+    remote URL, and the next login may be a different account.
+    """
     cleared = dict(data)
+    cleared.pop("ezlo_app", None)
     cleared.update(
         {
             "is_logged_in": False,
@@ -654,6 +808,15 @@ def _logged_out_data(data: Mapping[str, Any]) -> dict[str, Any]:
         }
     )
     return cleared
+
+
+def _ezlo_app_status(ezlo_app: Mapping[str, Any] | None) -> str:
+    """The Ezlo app line of the status screen."""
+    if not ezlo_app:
+        return "Not connected"
+    if name := ezlo_app.get("property_name"):
+        return f"Connected to {name}"
+    return "Connected"
 
 
 def subscribe_prompt(

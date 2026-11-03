@@ -26,6 +26,8 @@ REDACT = {
     # The central subscribe URLs embed the user's email as a query param.
     "checkout_url",
     "subscribe_url",
+    # Ezlo app connection: the token id is not the token, but keep it out anyway.
+    "refresh_token_id",
 }
 
 

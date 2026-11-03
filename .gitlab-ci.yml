@@ -6,7 +6,7 @@ variables:
   GITHUB_REPO: "ezloteam/homeassistant-ezlo-cloud"
   # Space-separated paths that live ONLY on GitLab and must never be mirrored
   # to the public GitHub repo (stripped from the squashed commit below).
-  GITHUB_EXCLUDE: "CONTRIBUTING.md CLAUDE.md"
+  GITHUB_EXCLUDE: "CONTRIBUTING.md CLAUDE.md docs/ezlo-app-registration.md"
 
 sync-to-github:
   stage: sync
@@ -20,8 +20,9 @@ sync-to-github:
     - git config --global user.email "integrator@ezlo.com"
     - git config --global user.name "eZLO CI"
 
-    # Add GitHub remote
-    - git remote add github "https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git" || git remote set-url github "https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
+    # Token via credential helper: libcurl >= 8.23 strips URL creds, which breaks push
+    - git config --global credential.helper '!f() { echo username=x-access-token; echo "password=${GITHUB_TOKEN}"; }; f'
+    - git remote add github "https://github.com/${GITHUB_REPO}.git" || git remote set-url github "https://github.com/${GITHUB_REPO}.git"
 
     # Fetch GitHub master to compare
     - git fetch github master || true

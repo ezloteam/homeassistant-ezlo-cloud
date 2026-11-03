@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from homeassistant.config_entries import ConfigEntry
 
@@ -17,6 +17,24 @@ class EzloUserData(TypedDict, total=False):
     username: str
     email: str
     ezlo_id: int | str
+
+
+class EzloAppData(TypedDict):
+    """The Ezlo app connection stored on the entry (see ezlo_app.py).
+
+    Holds identifiers only — the access token itself lives in Home Assistant's
+    auth store and on the platform, never on the entry.
+    """
+
+    ha_user_id: str
+    refresh_token_id: str
+    pk_account: int
+    serial: str
+    ha_url: str
+    # The property the hub was added to. Absent on connections made before the
+    # property picker, or against a platform that does not report it.
+    property_id: NotRequired[str]
+    property_name: NotRequired[str]
 
 
 class EzloConfigData(TypedDict, total=False):
@@ -36,6 +54,8 @@ class EzloConfigData(TypedDict, total=False):
     server_name: str
     subdomain: str
     api_uri: str
+    property_uri: str
+    ezlo_app: EzloAppData
 
 
 @dataclass
